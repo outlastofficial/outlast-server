@@ -1,22 +1,22 @@
-const express = require("express");
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
-const cors = require("cors");
-const WebSocket = require("ws");
+const express = require('express');
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const cors = require('cors');
+const WebSocket = require('ws');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
 
-const DATA_DIR = path.join(__dirname, "data");
-const FEEDBACK_FILE = path.join(DATA_DIR, "feedback.json");
+const DATA_DIR = path.join(__dirname, 'data');
+const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 function loadFeedback() {
   try {
-    const parsed = JSON.parse(fs.readFileSync(FEEDBACK_FILE, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf8'));
     return Array.isArray(parsed) ? parsed : [];
   } catch (_) {
     return [];
@@ -24,47 +24,137 @@ function loadFeedback() {
 }
 
 let feedback = loadFeedback();
+const rooms = new Map();
+const MAX_ROOM_PLAYERS = 4;
 
 function saveFeedback() {
-  const temp = FEEDBACK_FILE + ".tmp";
-  fs.writeFileSync(temp, JSON.stringify(feedback, null, 2), "utf8");
-  fs.renameSync(temp, FEEDBACK_FILE);
+  const tmp = FEEDBACK_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(feedback, null, 2), 'utf8');
+  fs.renameSync(tmp, FEEDBACK_FILE);
+}
+
+function clean(value, max) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function roomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  do {
+    code = '';
+    for (let i = 0; i < 4; i++) {
+      code += chars[Math.floor(Math.random() * chars.length)];
+    }
+  } while (rooms.has(code));
+  return code;
+}
+
+function roomSnapshot(room) {
+  return {
+    code: room.code,
+    started: room.started,
+    players: [...room.players.values()].map(p => ({
+      id: p.id,
+      username: p.username,
+      x: p.x,
+      y: p.y,
+      skinColor: p.skinColor,
+      characterVisual: p.characterVisual,
+      level: p.level
+    }))
+  };
+}
+
+function send(socket, payload) {
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(payload));
+  }
+}
+
+function broadcastRoom(room, payload, exceptId = null) {
+  for (const player of room.players.values()) {
+    if (player.id !== exceptId) {
+      send(player.socket, payload);
+    }
+  }
+}
+
+function detachFromRoom(player) {
+  if (!player.roomCode) return;
+
+  const room = rooms.get(player.roomCode);
+
+  if (!room) {
+    player.roomCode = '';
+    return;
+  }
+
+  room.players.delete(player.id);
+
+  broadcastRoom(room, {
+    type: 'player_left',
+    id: player.id
+  });
+
+  if (room.players.size === 0) {
+    rooms.delete(room.code);
+  } else {
+    broadcastRoom(room, {
+      type: 'room_state',
+      ...roomSnapshot(room)
+    });
+  }
+
+  player.roomCode = '';
 }
 
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: "32kb" }));
+app.use(express.json({ limit: '32kb' }));
 
-app.get("/", (req, res) => {
+app.get('/', (req, res) => {
   res.json({
-    status: "online",
-    game: "OUTLAST",
-    version: "2.6.0",
+    status: 'online',
+    game: 'OUTLAST',
+    version: '2.6.1',
     players: wss.clients.size,
-    feedback: feedback.length
+    feedback: feedback.length,
+    rooms: rooms.size
   });
 });
 
-app.get("/api/feedback", (req, res) => {
+app.get('/api/feedback', (req, res) => {
   res.json({
-    entries: feedback.slice().sort((a, b) => Number(b.date) - Number(a.date))
+    entries: feedback
+      .slice()
+      .sort((a, b) => Number(b.date) - Number(a.date))
   });
 });
 
-app.post("/api/feedback", (req, res) => {
-  const clientId = String(req.body?.clientId || "").slice(0, 120);
-  const user = String(req.body?.user || "Player").trim().slice(0, 18) || "Player";
-  const type = req.body?.type === "idea" ? "idea" : "bug";
-  const title = String(req.body?.title || "").trim().slice(0, 80);
-  const body = String(req.body?.body || "").trim().slice(0, 1000);
+app.post('/api/feedback', (req, res) => {
+  const clientId = clean(req.body?.clientId, 120);
+  const user = clean(req.body?.user, 18) || 'Player';
+  const type = req.body?.type === 'idea' ? 'idea' : 'bug';
+  const title = clean(req.body?.title, 80);
+  const body = clean(req.body?.body, 1000);
   const date = Number(req.body?.date) || Date.now();
 
   if (title.length < 3 || body.length < 5) {
-    return res.status(400).json({ ok: false, error: "Title/body too short" });
+    return res.status(400).json({
+      ok: false,
+      error: 'Title/body too short'
+    });
   }
 
   if (clientId) {
     const existing = feedback.find(x => x.clientId === clientId);
-    if (existing) return res.json({ ok: true, duplicate: true, entry: existing });
+
+    if (existing) {
+      return res.json({
+        ok: true,
+        duplicate: true,
+        entry: existing
+      });
+    }
   }
 
   const duplicate = feedback.find(x =>
@@ -74,7 +164,11 @@ app.post("/api/feedback", (req, res) => {
   );
 
   if (duplicate) {
-    return res.json({ ok: true, duplicate: true, entry: duplicate });
+    return res.json({
+      ok: true,
+      duplicate: true,
+      entry: duplicate
+    });
   }
 
   const entry = {
@@ -84,7 +178,7 @@ app.post("/api/feedback", (req, res) => {
     type,
     title,
     body,
-    status: "Pending",
+    status: 'Pending',
     reward: 0,
     date
   };
@@ -99,43 +193,213 @@ app.post("/api/feedback", (req, res) => {
   });
 });
 
-wss.on("connection", socket => {
-  console.log("Player connected");
+wss.on('connection', socket => {
+  const player = {
+    id:
+      Math.random().toString(36).slice(2) +
+      Date.now().toString(36),
 
-  socket.send(JSON.stringify({
-    type: "welcome",
-    message: "Connected to the OUTLAST server!"
-  }));
-
-  const broadcastCount = () => {
-    const message = JSON.stringify({
-      type: "player_count",
-      players: wss.clients.size
-    });
-
-    for (const player of wss.clients) {
-      if (player.readyState === WebSocket.OPEN) {
-        player.send(message);
-      }
-    }
+    socket,
+    username: 'Player',
+    roomCode: '',
+    x: 1600,
+    y: 1200,
+    skinColor: '#ff9d5c',
+    characterVisual: {
+      body: '#ff9d5c',
+      style: 'survivor'
+    },
+    level: 1
   };
 
-  socket.on("message", message => {
-    for (const player of wss.clients) {
-      if (player !== socket && player.readyState === WebSocket.OPEN) {
-        player.send(message.toString());
+  send(socket, {
+    type: 'welcome',
+    message: 'Connected to the OUTLAST server!',
+    id: player.id
+  });
+
+  broadcastPlayerCount();
+
+  socket.on('message', raw => {
+    let msg;
+
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch (_) {
+      return;
+    }
+
+    const type = msg?.type;
+
+    if (type === 'player_join' || type === 'player_ping') {
+      player.username =
+        clean(msg.username, 18) || player.username;
+      return;
+    }
+
+    if (type === 'create_room') {
+      detachFromRoom(player);
+
+      const code = roomCode();
+
+      const room = {
+        code,
+        started: false,
+        players: new Map()
+      };
+
+      rooms.set(code, room);
+
+      player.roomCode = code;
+      player.username =
+        clean(msg.username, 18) || player.username;
+
+      room.players.set(player.id, player);
+
+      send(socket, {
+        type: 'room_created',
+        ...roomSnapshot(room),
+        selfId: player.id
+      });
+
+      return;
+    }
+
+    if (type === 'join_room') {
+      detachFromRoom(player);
+
+      const code = clean(msg.code, 4).toUpperCase();
+      const room = rooms.get(code);
+
+      if (!room) {
+        return send(socket, {
+          type: 'room_error',
+          error: 'Room not found.'
+        });
       }
+
+      if (room.players.size >= MAX_ROOM_PLAYERS) {
+        return send(socket, {
+          type: 'room_error',
+          error: 'That room is full.'
+        });
+      }
+
+      player.roomCode = code;
+      player.username =
+        clean(msg.username, 18) || player.username;
+
+      room.players.set(player.id, player);
+
+      broadcastRoom(room, {
+        type: 'room_state',
+        ...roomSnapshot(room)
+      });
+
+      send(socket, {
+        type: 'room_joined',
+        ...roomSnapshot(room),
+        selfId: player.id
+      });
+
+      return;
+    }
+
+    if (type === 'leave_room') {
+      detachFromRoom(player);
+      return;
+    }
+
+    if (type === 'start_run') {
+      const room = rooms.get(player.roomCode);
+
+      if (!room) {
+        return send(socket, {
+          type: 'room_error',
+          error: 'Join a room first.'
+        });
+      }
+
+      room.started = true;
+
+      broadcastRoom(room, {
+        type: 'room_game_start'
+      });
+
+      broadcastRoom(room, {
+        type: 'room_state',
+        ...roomSnapshot(room)
+      });
+
+      return;
+    }
+
+    if (type === 'player_state') {
+      const room = rooms.get(player.roomCode);
+
+      if (!room) return;
+
+      player.username =
+        clean(msg.username, 18) || player.username;
+
+      player.x = Number.isFinite(Number(msg.x))
+        ? Math.max(0, Math.min(3200, Number(msg.x)))
+        : player.x;
+
+      player.y = Number.isFinite(Number(msg.y))
+        ? Math.max(0, Math.min(2400, Number(msg.y)))
+        : player.y;
+
+      player.skinColor =
+        clean(msg.skinColor, 24) || player.skinColor;
+
+      player.characterVisual =
+        msg.characterVisual &&
+        typeof msg.characterVisual === 'object'
+          ? msg.characterVisual
+          : player.characterVisual;
+
+      player.level = Math.max(
+        1,
+        Math.min(999, Number(msg.level) || 1)
+      );
+
+      broadcastRoom(
+        room,
+        {
+          type: 'player_state',
+          id: player.id,
+          username: player.username,
+          x: player.x,
+          y: player.y,
+          skinColor: player.skinColor,
+          characterVisual: player.characterVisual,
+          level: player.level
+        },
+        player.id
+      );
+
+      return;
     }
   });
 
-  socket.on("close", () => {
-    console.log("Player disconnected");
-    broadcastCount();
+  socket.on('close', () => {
+    detachFromRoom(player);
+    broadcastPlayerCount();
   });
-
-  broadcastCount();
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+function broadcastPlayerCount() {
+  const payload = {
+    type: 'player_count',
+    players: wss.clients.size
+  };
+
+  for (const socket of wss.clients) {
+    send(socket, payload);
+  }
+}
+
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`OUTLAST server running on port ${PORT}`);
 });
