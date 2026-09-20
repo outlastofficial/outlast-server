@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 10000;
 
 const DATA_DIR = path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
+const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 function loadFeedback() {
@@ -23,7 +24,11 @@ function loadFeedback() {
   }
 }
 
+function loadJson(file, fallback) { try { const parsed=JSON.parse(fs.readFileSync(file,'utf8')); return parsed; } catch (_) { return fallback; } }
+function saveJson(file, value) { const tmp=file+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(value,null,2),'utf8'); fs.renameSync(tmp,file); }
 let feedback = loadFeedback();
+let leaderboard = loadJson(LEADERBOARD_FILE, []);
+if(!Array.isArray(leaderboard)) leaderboard=[];
 const rooms = new Map();
 const MAX_ROOM_PLAYERS = 4;
 
@@ -115,11 +120,23 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     game: 'OUTLAST',
-    version: '2.6.1',
+    version: '3.0.0',
     players: wss.clients.size,
     feedback: feedback.length,
     rooms: rooms.size
   });
+});
+
+app.get('/api/leaderboard', (req,res)=>{ res.json({entries: leaderboard.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0)).slice(0,100)}); });
+
+app.post('/api/leaderboard',(req,res)=>{
+ const name=clean(req.body?.name,18)||'Player'; const score=Math.max(0,Math.floor(Number(req.body?.score)||0)); const level=Math.max(1,Math.floor(Number(req.body?.level)||1)); const kills=Math.max(0,Math.floor(Number(req.body?.kills)||0)); const mode=clean(req.body?.mode,30)||'Classic'; const difficulty=clean(req.body?.difficulty,30)||'Normal';
+ if(!score) return res.status(400).json({ok:false,error:'Score required'});
+ const key=name.toLowerCase(); const badge=key==='bestgamer'?'OWNER':''; const incoming={name,score,level,kills,mode,difficulty,date:new Date().toLocaleDateString(),badge};
+ const i=leaderboard.findIndex(x=>String(x.name||'').toLowerCase()===key);
+ if(i>=0){ if(score>Number(leaderboard[i].score||0)) leaderboard[i]={...leaderboard[i],...incoming}; else return res.json({ok:true,updated:false,entry:leaderboard[i]}); }
+ else { leaderboard.push(incoming); }
+ leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0)); leaderboard=leaderboard.slice(0,100); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming});
 });
 
 app.get('/api/feedback', (req, res) => {
