@@ -13,6 +13,8 @@ const PORT = process.env.PORT || 10000;
 const DATA_DIR = path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
+const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
+const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 function loadFeedback() {
@@ -28,6 +30,8 @@ function loadJson(file, fallback) { try { const parsed=JSON.parse(fs.readFileSyn
 function saveJson(file, value) { const tmp=file+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(value,null,2),'utf8'); fs.renameSync(tmp,file); }
 let feedback = loadFeedback();
 let leaderboard = loadJson(LEADERBOARD_FILE, []);
+let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
+if(!Array.isArray(betaPlayers)) betaPlayers=[];
 if(!Array.isArray(leaderboard)) leaderboard=[];
 const rooms = new Map();
 const MAX_ROOM_PLAYERS = 4;
@@ -120,7 +124,7 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     game: 'OUTLAST',
-    version: '3.0.0',
+    version: '3.1.0',
     players: wss.clients.size,
     feedback: feedback.length,
     rooms: rooms.size
@@ -132,7 +136,15 @@ app.get('/api/leaderboard', (req,res)=>{ res.json({entries: leaderboard.slice().
 app.post('/api/leaderboard',(req,res)=>{
  const name=clean(req.body?.name,18)||'Player'; const score=Math.max(0,Math.floor(Number(req.body?.score)||0)); const level=Math.max(1,Math.floor(Number(req.body?.level)||1)); const kills=Math.max(0,Math.floor(Number(req.body?.kills)||0)); const mode=clean(req.body?.mode,30)||'Classic'; const difficulty=clean(req.body?.difficulty,30)||'Normal';
  if(!score) return res.status(400).json({ok:false,error:'Score required'});
- const key=name.toLowerCase(); const badge=key==='bestgamer'?'OWNER':''; const incoming={name,score,level,kills,mode,difficulty,date:new Date().toLocaleDateString(),badge};
+ const key=name.toLowerCase();
+ const existing=leaderboard.find(x=>String(x.name||'').toLowerCase()===key);
+ let badge=String(existing?.badge||'');
+ if(key==='bestgamer') badge='OWNER';
+ const excluded=['tester','admin','administrator'].includes(key);
+ if(!badge && !excluded && !betaPlayers.some(x=>String(x).toLowerCase()===key) && betaPlayers.length<BETA_BADGE_LIMIT){
+   betaPlayers.push(name); saveJson(BETA_PLAYERS_FILE,betaPlayers); badge='BETA';
+ }
+ const incoming={name,score,level,kills,mode,difficulty,date:new Date().toLocaleDateString(),badge};
  const i=leaderboard.findIndex(x=>String(x.name||'').toLowerCase()===key);
  if(i>=0){ if(score>Number(leaderboard[i].score||0)) leaderboard[i]={...leaderboard[i],...incoming}; else return res.json({ok:true,updated:false,entry:leaderboard[i]}); }
  else { leaderboard.push(incoming); }
