@@ -10,7 +10,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
@@ -124,14 +124,23 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     game: 'OUTLAST',
-    version: '3.1.2',
+    version: '3.2.0',
     players: wss.clients.size,
     feedback: feedback.length,
     rooms: rooms.size
   });
 });
 
-app.get('/api/leaderboard', (req,res)=>{ res.json({entries: leaderboard.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0)).slice(0,100)}); });
+app.get('/api/leaderboard', (req,res)=>{
+  res.json({
+    version:'3.2.0',
+    persistentStorage:Boolean(process.env.OUTLAST_DATA_DIR),
+    entries: leaderboard
+      .slice()
+      .sort((a,b)=>Number(b.score||0)-Number(a.score||0))
+      .slice(0,100)
+  });
+});
 
 app.post('/api/leaderboard',(req,res)=>{
  const name=clean(req.body?.name,18)||'Player'; const score=Math.max(0,Math.floor(Number(req.body?.score)||0)); const level=Math.max(1,Math.floor(Number(req.body?.level)||1)); const kills=Math.max(0,Math.floor(Number(req.body?.kills)||0)); const mode=clean(req.body?.mode,30)||'Classic'; const difficulty=clean(req.body?.difficulty,30)||'Normal';
