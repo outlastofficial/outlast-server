@@ -124,7 +124,7 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     game: 'OUTLAST',
-    version: '3.1.0',
+    version: '3.1.2',
     players: wss.clients.size,
     feedback: feedback.length,
     rooms: rooms.size
@@ -135,7 +135,6 @@ app.get('/api/leaderboard', (req,res)=>{ res.json({entries: leaderboard.slice().
 
 app.post('/api/leaderboard',(req,res)=>{
  const name=clean(req.body?.name,18)||'Player'; const score=Math.max(0,Math.floor(Number(req.body?.score)||0)); const level=Math.max(1,Math.floor(Number(req.body?.level)||1)); const kills=Math.max(0,Math.floor(Number(req.body?.kills)||0)); const mode=clean(req.body?.mode,30)||'Classic'; const difficulty=clean(req.body?.difficulty,30)||'Normal';
- if(!score) return res.status(400).json({ok:false,error:'Score required'});
  const key=name.toLowerCase();
  const existing=leaderboard.find(x=>String(x.name||'').toLowerCase()===key);
  let badge=String(existing?.badge||'');
