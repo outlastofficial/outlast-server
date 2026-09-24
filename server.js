@@ -13,6 +13,7 @@ const PORT = process.env.PORT || 10000;
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
+const LEADERBOARD_BACKUP_FILE = path.join(DATA_DIR, 'leaderboard.backup.json');
 const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -27,13 +28,27 @@ function loadFeedback() {
 }
 
 function loadJson(file, fallback) { try { const parsed=JSON.parse(fs.readFileSync(file,'utf8')); return parsed; } catch (_) { return fallback; } }
-function saveJson(file, value) { const tmp=file+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(value,null,2),'utf8'); fs.renameSync(tmp,file); }
+function saveJson(file, value) { const tmp=file+'.tmp'; if(file===LEADERBOARD_FILE && fs.existsSync(file)){ try{fs.copyFileSync(file,LEADERBOARD_BACKUP_FILE);}catch(_){} } fs.writeFileSync(tmp, JSON.stringify(value,null,2),'utf8'); fs.renameSync(tmp,file); }
 let feedback = loadFeedback();
 let leaderboard = loadJson(LEADERBOARD_FILE, []);
 let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
 if(!Array.isArray(betaPlayers)) betaPlayers=[];
 if(!Array.isArray(leaderboard)) leaderboard=[];
 const rooms = new Map();
+
+function challengeForDate(dateKey){
+  const key=String(dateKey||'').slice(0,10) || new Date().toISOString().slice(0,10);
+  let h=2166136261; for(const ch of 'OUTLAST:'+key){h^=ch.charCodeAt(0);h=Math.imul(h,16777619);} h>>>=0;
+  const list=[
+    ['Blackout Protocol','Visibility is reduced during blackout events.'],
+    ['Elite Surge','Elite encounters appear more frequently.'],
+    ['Rapid Waves','Wave pacing is increased.'],
+    ['Fragile Run','Healing is less effective; pickups remain unchanged.'],
+    ['Treasure Hunt','Extra pickup opportunities appear.'],
+    ['Endurance','The goal is to survive as long as possible.']
+  ];
+  const m=list[h%list.length]; return {date:key,seed:h,modifier:m[0],description:m[1],version:'3.3.0'};
+}
 const MAX_ROOM_PLAYERS = 4;
 
 function saveFeedback() {
@@ -124,7 +139,7 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     game: 'OUTLAST',
-    version: '3.2.0',
+    version: '3.3.0',
     players: wss.clients.size,
     feedback: feedback.length,
     rooms: rooms.size
@@ -133,7 +148,7 @@ app.get('/', (req, res) => {
 
 app.get('/api/leaderboard', (req,res)=>{
   res.json({
-    version:'3.2.0',
+    version:'3.3.0',
     persistentStorage:Boolean(process.env.OUTLAST_DATA_DIR),
     entries: leaderboard
       .slice()
