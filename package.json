@@ -1,6 +1,6 @@
 {
   "name": "outlast-server",
-  "version": "2.6.1",
+  "version": "3.4.0",
   "description": "OUTLAST multiplayer server with rooms",
   "main": "server.js",
   "scripts": {
