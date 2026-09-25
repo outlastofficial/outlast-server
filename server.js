@@ -192,6 +192,7 @@ app.post('/api/owner/gift-coins',(req,res)=>{
   if(owner.toLowerCase()!==OWNER_USERNAME.toLowerCase() || password!==OWNER_PASSWORD){
     return res.status(403).json({ok:false,error:'Owner authorization required'});
   }
+  if(target.toLowerCase()===OWNER_USERNAME.toLowerCase()) return res.status(400).json({ok:false,error:'Choose another player'});
   if(!/^[A-Za-z0-9 _-]{2,18}$/.test(target)){
     return res.status(400).json({ok:false,error:'Invalid player username'});
   }
