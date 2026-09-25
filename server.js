@@ -35,6 +35,7 @@ let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
 if(!Array.isArray(betaPlayers)) betaPlayers=[];
 if(!Array.isArray(leaderboard)) leaderboard=[];
 const rooms = new Map();
+const leaderboardRate = new Map();
 
 function challengeForDate(dateKey){
   const key=String(dateKey||'').slice(0,10) || new Date().toISOString().slice(0,10);
@@ -47,7 +48,7 @@ function challengeForDate(dateKey){
     ['Treasure Hunt','Extra pickup opportunities appear.'],
     ['Endurance','The goal is to survive as long as possible.']
   ];
-  const m=list[h%list.length]; return {date:key,seed:h,modifier:m[0],description:m[1],version:'3.3.0'};
+  const m=list[h%list.length]; return {date:key,seed:h,modifier:m[0],description:m[1],version:'3.4.0'};
 }
 const MAX_ROOM_PLAYERS = 4;
 
@@ -139,7 +140,7 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     game: 'OUTLAST',
-    version: '3.3.0',
+    version: '3.4.0',
     players: wss.clients.size,
     feedback: feedback.length,
     rooms: rooms.size
@@ -148,7 +149,7 @@ app.get('/', (req, res) => {
 
 app.get('/api/leaderboard', (req,res)=>{
   res.json({
-    version:'3.3.0',
+    version:'3.4.0',
     persistentStorage:Boolean(process.env.OUTLAST_DATA_DIR),
     entries: leaderboard
       .slice()
@@ -158,7 +159,12 @@ app.get('/api/leaderboard', (req,res)=>{
 });
 
 app.post('/api/leaderboard',(req,res)=>{
+ const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
+ const now=Date.now(); const recent=leaderboardRate.get(ip)||[]; const windowed=recent.filter(t=>now-t<10*60*1000); if(windowed.length>=30)return res.status(429).json({ok:false,error:'Too many leaderboard submissions'}); windowed.push(now); leaderboardRate.set(ip,windowed);
  const name=clean(req.body?.name,18)||'Player'; const score=Math.max(0,Math.floor(Number(req.body?.score)||0)); const level=Math.max(1,Math.floor(Number(req.body?.level)||1)); const kills=Math.max(0,Math.floor(Number(req.body?.kills)||0)); const mode=clean(req.body?.mode,30)||'Classic'; const difficulty=clean(req.body?.difficulty,30)||'Normal';
+ const duration=Math.max(0,Math.floor(Number(req.body?.duration)||0)); const seed=clean(req.body?.seed,48); const modifier=clean(req.body?.modifier,40)||'None'; const challenge=clean(req.body?.challenge,40)||'None'; const weapon=clean(req.body?.weapon,40); const character=clean(req.body?.character,40); const extracted=Boolean(req.body?.extracted);
+ if(level>10000 || kills>5000000 || score>1000000000) return res.status(400).json({ok:false,error:'Impossible leaderboard values'});
+ if(duration>0 && duration<5 && score>1000000) return res.status(400).json({ok:false,error:'Run metadata failed validation'});
  const key=name.toLowerCase();
  const existing=leaderboard.find(x=>String(x.name||'').toLowerCase()===key);
  let badge=String(existing?.badge||'');
@@ -167,12 +173,16 @@ app.post('/api/leaderboard',(req,res)=>{
  if(!badge && !excluded && !betaPlayers.some(x=>String(x).toLowerCase()===key) && betaPlayers.length<BETA_BADGE_LIMIT){
    betaPlayers.push(name); saveJson(BETA_PLAYERS_FILE,betaPlayers); badge='BETA';
  }
- const incoming={name,score,level,kills,mode,difficulty,date:new Date().toLocaleDateString(),badge};
+ const incoming={name,score,level,kills,mode,difficulty,duration,seed,modifier,challenge,weapon,character,extracted,date:new Date().toLocaleDateString(),badge};
  const i=leaderboard.findIndex(x=>String(x.name||'').toLowerCase()===key);
  if(i>=0){ if(score>Number(leaderboard[i].score||0)) leaderboard[i]={...leaderboard[i],...incoming}; else return res.json({ok:true,updated:false,entry:leaderboard[i]}); }
  else { leaderboard.push(incoming); }
  leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0)); leaderboard=leaderboard.slice(0,100); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming});
 });
+
+app.get('/api/health',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.4.0',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length}));
+
+app.get('/api/coop/status',(req,res)=>res.json({version:'3.4.0',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS}));
 
 app.get('/api/feedback', (req, res) => {
   res.json({
