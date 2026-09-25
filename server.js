@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const WebSocket = require('ws');
+const { initDiscord } = require('./discord-bot');
 
 const app = express();
 const server = http.createServer(app);
@@ -465,6 +466,8 @@ function broadcastPlayerCount() {
     send(socket, payload);
   }
 }
+
+initDiscord({ app, dataDir: DATA_DIR, inviteUrl: 'https://discord.gg/bCMdZfggQ' });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`OUTLAST server running on port ${PORT}`);
