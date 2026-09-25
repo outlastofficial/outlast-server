@@ -430,64 +430,34 @@ function initDiscord({ app, dataDir, inviteUrl }) {
       }
     }
   });
-
-  client.on("debug", info => console.log("[Discord][debug]", info));
-  client.on("error", error => console.error("[Discord] Client error:", error));
+\n  client.on("error", error => console.error("[Discord] Client error:", error));
   client.on("warn", message => console.warn("[Discord] Warning:", message));
   client.on("shardError", error => console.error("[Discord] Shard error:", error.message));
   client.on("shardDisconnect", (event, shardId) => console.error("[Discord] Shard disconnected:", shardId, event?.code, event?.reason || ""));
   client.on("shardReconnecting", shardId => console.log("[Discord] Shard reconnecting:", shardId));
-  console.log("[Discord] Token present:", Boolean(token), "Guild ID:", guildId, "Token length:", token.length);
-  (async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    try {
-      const gatewayResponse = await fetch("https://discord.com/api/v10/gateway", {
-        signal: controller.signal,
-      });
-      const gatewayBody = await gatewayResponse.text();
-      console.log("[Discord] Gateway HTTP test:", gatewayResponse.status, gatewayBody.slice(0, 500));
-      console.log("[Discord] Gateway retry-after:", gatewayResponse.headers.get("retry-after") || "none");
-      console.log("[Discord] Gateway server:", gatewayResponse.headers.get("server") || "none");
-    } catch (error) {
-      console.error("[Discord] Gateway HTTP test failed:", error?.name || "Error", error?.message || String(error));
-    } finally {
-      clearTimeout(timer);
-    }
-  })();
 
-  (async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    try {
-      const response = await fetch("https://discord.com/api/v10/users/@me", {
-        headers: { Authorization: "Bot " + token },
-        signal: controller.signal,
-      });
-      const body = await response.text();
-      console.log("[Discord] REST HTTP test:", response.status);
-      console.log("[Discord] REST retry-after:", response.headers.get("retry-after") || "none");
-      console.log("[Discord] REST server:", response.headers.get("server") || "none");
-      if (!response.ok) {
-        console.error("[Discord] REST authentication failed:", response.status, body.slice(0, 300));
-      } else {
-        const me = JSON.parse(body);
-        console.log("[Discord] REST authentication OK as " + me.username + " (" + me.id + ").");
+  async function discordPreflight(){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),10000);
+    try{
+      const response=await fetch("https://discord.com/api/v10/gateway",{signal:controller.signal});
+      if(response.status===429){
+        const retry=Number(response.headers.get("retry-after")||0);
+        console.error("[Discord] Discord/Cloudflare is rate-limiting Render. Retry-after: "+retry+" seconds. Login attempt skipped.");
+        return false;
       }
-    } catch (error) {
-      console.error("[Discord] REST connection test failed:", error?.name || "Error", error?.message || String(error));
-    } finally {
-      clearTimeout(timer);
-    }
+      if(!response.ok){ console.error("[Discord] Gateway preflight failed:",response.status); return false; }
+      return true;
+    }catch(error){ console.error("[Discord] Gateway preflight failed:",error?.name||"Error",error?.message||String(error)); return false; }
+    finally{ clearTimeout(timer); }
+  }
+
+  (async()=>{
+    const ok=await discordPreflight();
+    if(!ok)return;
+    client.login(token).then(()=>console.log("[Discord] Login request accepted; waiting for READY event...")).catch(error=>console.error("[Discord] Bot login failed:",error?.name||"Error",error?.message||String(error)));
+    setTimeout(()=>{if(!discordReady)console.error("[Discord] Bot has not reached READY after 30 seconds.");},30000);
   })();
-  client.login(token).then(() => {
-    console.log("[Discord] Login request accepted; waiting for READY event...");
-  }).catch(error => {
-    console.error("[Discord] Bot login failed:", error?.name || "Error", error?.message || String(error));
-  });
-  setTimeout(() => {
-    if (!discordReady) console.error("[Discord] Bot has not reached READY after 30 seconds.");
-  }, 30000);
 
   return client;
 }
