@@ -264,9 +264,11 @@ function initDiscord({ app, dataDir, inviteUrl }) {
 
     await cacheInvites(guild);
     setInterval(() => pollInviteUses(guild), 30000);
+    // Register commands only in the OUTLAST server. The previous global + guild
+    // registration created duplicate slash commands such as two /ping entries.
     await guild.commands.set(commands);
-    await client.application.commands.set(commands);
-    console.log("[Discord] OUTLAST commands registered for guild " + guild.id + " and globally.");
+    await client.application.commands.set([]);
+    console.log("[Discord] OUTLAST commands registered for guild " + guild.id + ". Global commands cleared.");
   });
 
   client.on("inviteCreate", invite => {
