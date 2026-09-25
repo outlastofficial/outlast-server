@@ -431,6 +431,7 @@ function initDiscord({ app, dataDir, inviteUrl }) {
     }
   });
 
+  client.on("debug", info => console.log("[Discord][debug]", info));
   client.on("error", error => console.error("[Discord] Client error:", error));
   client.on("warn", message => console.warn("[Discord] Warning:", message));
   client.on("shardError", error => console.error("[Discord] Shard error:", error.message));
@@ -441,11 +442,32 @@ function initDiscord({ app, dataDir, inviteUrl }) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
+      const gatewayResponse = await fetch("https://discord.com/api/v10/gateway", {
+        signal: controller.signal,
+      });
+      const gatewayBody = await gatewayResponse.text();
+      console.log("[Discord] Gateway HTTP test:", gatewayResponse.status, gatewayBody.slice(0, 500));
+      console.log("[Discord] Gateway retry-after:", gatewayResponse.headers.get("retry-after") || "none");
+      console.log("[Discord] Gateway server:", gatewayResponse.headers.get("server") || "none");
+    } catch (error) {
+      console.error("[Discord] Gateway HTTP test failed:", error?.name || "Error", error?.message || String(error));
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+
+  (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
       const response = await fetch("https://discord.com/api/v10/users/@me", {
         headers: { Authorization: "Bot " + token },
         signal: controller.signal,
       });
       const body = await response.text();
+      console.log("[Discord] REST HTTP test:", response.status);
+      console.log("[Discord] REST retry-after:", response.headers.get("retry-after") || "none");
+      console.log("[Discord] REST server:", response.headers.get("server") || "none");
       if (!response.ok) {
         console.error("[Discord] REST authentication failed:", response.status, body.slice(0, 300));
       } else {
