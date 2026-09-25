@@ -4,6 +4,8 @@ const crypto = require("crypto");
 const {
   Client,
   GatewayIntentBits,
+  REST,
+  Routes,
   ChannelType,
   PermissionFlagsBits,
   SlashCommandBuilder,
@@ -435,6 +437,15 @@ function initDiscord({ app, dataDir, inviteUrl }) {
   client.on("shardDisconnect", (event, shardId) => console.error("[Discord] Shard disconnected:", shardId, event?.code, event?.reason || ""));
   client.on("shardReconnecting", shardId => console.log("[Discord] Shard reconnecting:", shardId));
   console.log("[Discord] Token present:", Boolean(token), "Guild ID:", guildId, "Token length:", token.length);
+  (async () => {
+    try {
+      const rest = new REST({ version: "10" }).setToken(token);
+      const me = await rest.get(Routes.user());
+      console.log("[Discord] REST authentication OK as " + me.username + " (" + me.id + ").");
+    } catch (error) {
+      console.error("[Discord] REST authentication failed:", error?.status || "", error?.code || "", error?.message || String(error));
+    }
+  })();
   client.login(token).then(() => {
     console.log("[Discord] Login request accepted; waiting for READY event...");
   }).catch(error => {
