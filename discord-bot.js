@@ -197,7 +197,6 @@ function initDiscord({ app, dataDir, inviteUrl }) {
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMembers,
     ],
   });
 
@@ -256,6 +255,7 @@ function initDiscord({ app, dataDir, inviteUrl }) {
     }
 
     await cacheInvites(guild);
+    setInterval(() => pollInviteUses(guild), 30000);
     await guild.commands.set(commands);
     console.log("[Discord] OUTLAST commands registered.");
   });
@@ -271,23 +271,10 @@ function initDiscord({ app, dataDir, inviteUrl }) {
     inviteUses.delete(invite.code);
   });
 
-  client.on("guildMemberAdd", async member => {
-    if (member.guild.id !== guildId || member.user.bot) return;
-
+  async function pollInviteUses(guild) {
     try {
-      const invites = await member.guild.invites.fetch();
-      let used = null;
-
-      for (const invite of invites.values()) {
-        const before = Number(inviteUses.get(invite.code)?.uses || 0);
-        const after = Number(invite.uses || 0);
-        if (after > before) {
-          used = invite;
-          break;
-        }
-      }
-
-      inviteUses = new Map(
+      const invites = await guild.invites.fetch();
+      const next = new Map(
         [...invites.values()].map(invite => [
           invite.code,
           {
@@ -297,26 +284,26 @@ function initDiscord({ app, dataDir, inviteUrl }) {
         ])
       );
 
-      if (!used?.inviter?.id || used.inviter.id === member.id) {
-        persist();
-        return;
+      for (const [code, after] of next) {
+        const before = Number(inviteUses.get(code)?.uses || 0);
+        const increase = Math.max(0, after.uses - before);
+        if (!increase || !after.inviterId) continue;
+
+        const player = Object.values(store.players).find(p => p.discordId === after.inviterId);
+        if (!player) continue;
+
+        player.invites = Number(player.invites || 0) + increase;
+        player.lastInviteAt = Date.now();
+        console.log("[Discord] Verified " + increase + " invite(s) for " + player.username + ": " + player.invites);
       }
 
-      const player = Object.values(store.players).find(p => p.discordId === used.inviter.id);
-      if (!player) {
-        persist();
-        return;
-      }
-
-      player.invites = Number(player.invites || 0) + 1;
-      player.lastInviteAt = Date.now();
+      inviteUses = next;
+      for (const [code, info] of next) store.invites[code] = info;
       persist();
-
-      console.log("[Discord] Verified invite for " + player.username + ": " + player.invites);
     } catch (error) {
       console.error("[Discord] Invite tracking error:", error.message);
     }
-  });
+  }
 
   client.on("interactionCreate", async interaction => {
     if (!interaction.isChatInputCommand()) return;
