@@ -234,6 +234,9 @@ function initDiscord({ app, dataDir, inviteUrl }) {
       .setName("rewards")
       .setDescription("Show your OUTLAST Discord invite rewards."),
     new SlashCommandBuilder()
+      .setName("ping")
+      .setDescription("Check that the OUTLAST bot is online."),
+    new SlashCommandBuilder()
       .setName("outlast")
       .setDescription("Manage the OUTLAST Discord server.")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
@@ -257,7 +260,8 @@ function initDiscord({ app, dataDir, inviteUrl }) {
     await cacheInvites(guild);
     setInterval(() => pollInviteUses(guild), 30000);
     await guild.commands.set(commands);
-    console.log("[Discord] OUTLAST commands registered.");
+    await client.application.commands.set(commands);
+    console.log("[Discord] OUTLAST commands registered for guild " + guild.id + " and globally.");
   });
 
   client.on("inviteCreate", invite => {
@@ -309,6 +313,10 @@ function initDiscord({ app, dataDir, inviteUrl }) {
     if (!interaction.isChatInputCommand()) return;
 
     try {
+      if (interaction.commandName === "ping") {
+        return interaction.reply({ content: "🏓 OUTLAST Bot is online and connected.", ephemeral: true });
+      }
+
       if (interaction.commandName === "link") {
         const code = clean(interaction.options.getString("code"), 32).toUpperCase();
         const link = store.linkCodes[code];
@@ -418,6 +426,8 @@ function initDiscord({ app, dataDir, inviteUrl }) {
     }
   });
 
+  client.on("error", error => console.error("[Discord] Client error:", error));
+  console.log("[Discord] Token present:", Boolean(token), "Guild ID:", guildId);
   client.login(token).catch(error => {
     console.error("[Discord] Bot login failed:", error.message);
   });
