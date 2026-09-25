@@ -430,7 +430,8 @@ function initDiscord({ app, dataDir, inviteUrl }) {
       }
     }
   });
-\n  client.on("error", error => console.error("[Discord] Client error:", error));
+
+  client.on("error", error => console.error("[Discord] Client error:", error));
   client.on("warn", message => console.warn("[Discord] Warning:", message));
   client.on("shardError", error => console.error("[Discord] Shard error:", error.message));
   client.on("shardDisconnect", (event, shardId) => console.error("[Discord] Shard disconnected:", shardId, event?.code, event?.reason || ""));
