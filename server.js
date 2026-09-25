@@ -18,6 +18,9 @@ const LEADERBOARD_BACKUP_FILE = path.join(DATA_DIR, 'leaderboard.backup.json');
 const LEADERBOARD_MIRROR_FILE = path.join(DATA_DIR, 'leaderboard.mirror.json');
 const LEADERBOARD_JOURNAL_FILE = path.join(DATA_DIR, 'leaderboard.journal.json');
 const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
+const COIN_GIFTS_FILE = path.join(DATA_DIR, 'coin-gifts.json');
+const OWNER_USERNAME = 'BestGamer';
+const OWNER_PASSWORD = process.env.OUTLAST_OWNER_PASSWORD || '1296813';
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -50,8 +53,20 @@ if(!Array.isArray(leaderboard)){
   if(Array.isArray(leaderboard)&&leaderboard.length) saveJson(LEADERBOARD_FILE,leaderboard);
 }
 let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
+let coinGifts = loadJson(COIN_GIFTS_FILE, {});
+if(!coinGifts || typeof coinGifts!=='object' || Array.isArray(coinGifts)) coinGifts={};
 if(!Array.isArray(betaPlayers)) betaPlayers=[];
 if(!Array.isArray(leaderboard)) leaderboard=[];
+
+function saveCoinGifts(){
+  const tmp=COIN_GIFTS_FILE+'.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(coinGifts,null,2),'utf8');
+  fs.renameSync(tmp,COIN_GIFTS_FILE);
+}
+
+function coinGiftKey(username){
+  return clean(username,18).toLowerCase();
+}
 const rooms = new Map();
 const leaderboardRate = new Map();
 
@@ -66,7 +81,7 @@ function challengeForDate(dateKey){
     ['Treasure Hunt','Extra pickup opportunities appear.'],
     ['Endurance','The goal is to survive as long as possible.']
   ];
-  const m=list[h%list.length]; return {date:key,seed:h,modifier:m[0],description:m[1],version:'3.6.0'};
+  const m=list[h%list.length]; return {date:key,seed:h,modifier:m[0],description:m[1],version:'3.7.0'};
 }
 const MAX_ROOM_PLAYERS = 4;
 
@@ -158,7 +173,7 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     game: 'OUTLAST',
-    version: '3.6.0',
+    version: '3.7.0',
     players: wss.clients.size,
     feedback: feedback.length,
     rooms: rooms.size
@@ -169,9 +184,48 @@ app.get('/api/challenge/today',(req,res)=>{
   res.json(challengeForDate(new Date().toISOString().slice(0,10)));
 });
 
+app.post('/api/owner/gift-coins',(req,res)=>{
+  const owner=clean(req.body?.ownerUsername,18);
+  const password=String(req.body?.password??'');
+  const target=clean(req.body?.targetUsername,18);
+  const amount=Math.floor(Number(req.body?.amount));
+  if(owner.toLowerCase()!==OWNER_USERNAME.toLowerCase() || password!==OWNER_PASSWORD){
+    return res.status(403).json({ok:false,error:'Owner authorization required'});
+  }
+  if(!/^[A-Za-z0-9 _-]{2,18}$/.test(target)){
+    return res.status(400).json({ok:false,error:'Invalid player username'});
+  }
+  if(!Number.isSafeInteger(amount) || amount<1 || amount>10000000){
+    return res.status(400).json({ok:false,error:'Coin amount must be a whole number from 1 to 10,000,000'});
+  }
+  const key=coinGiftKey(target);
+  const existing=coinGifts[key]||{username:target,pending:0};
+  existing.username=target;
+  existing.pending=Math.min(1000000000,Number(existing.pending)||0)+amount;
+  existing.updatedAt=Date.now();
+  coinGifts[key]=existing;
+  saveCoinGifts();
+  return res.json({ok:true,username:existing.username,pending:existing.pending,amount});
+});
+
+app.post('/api/coins/claim',(req,res)=>{
+  const username=clean(req.body?.username,18);
+  if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)){
+    return res.status(400).json({ok:false,error:'Invalid username'});
+  }
+  const key=coinGiftKey(username);
+  const gift=coinGifts[key];
+  const amount=Math.max(0,Math.floor(Number(gift?.pending)||0));
+  if(amount>0){
+    delete coinGifts[key];
+    saveCoinGifts();
+  }
+  return res.json({ok:true,username,coins:amount});
+});
+
 app.get('/api/leaderboard', (req,res)=>{
   res.json({
-    version:'3.6.0',
+    version:'3.7.0',
     persistentStorage:Boolean(process.env.OUTLAST_DATA_DIR),
     entries: leaderboard
       .slice()
@@ -202,9 +256,9 @@ app.post('/api/leaderboard',(req,res)=>{
  leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0)); leaderboard=leaderboard.slice(0,100); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming});
 });
 
-app.get('/api/health',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.6.0',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length}));
+app.get('/api/health',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.7.0',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length}));
 
-app.get('/api/coop/status',(req,res)=>res.json({version:'3.6.0',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS}));
+app.get('/api/coop/status',(req,res)=>res.json({version:'3.7.0',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS}));
 
 app.get('/api/feedback', (req, res) => {
   res.json({
