@@ -87,8 +87,8 @@ async function setupOutlast(guild) {
 }
 
 function initDiscord({ app, dataDir, inviteUrl }) {
-  const token = process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN;
-  const guildId = process.env.DISCORD_GUILD_ID;
+  const token = (process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN || "").trim();
+  const guildId = (process.env.DISCORD_GUILD_ID || "").trim();
 
   const storeFile = path.join(dataDir, "discord-rewards.json");
   const store = loadStore(storeFile);
@@ -248,7 +248,10 @@ function initDiscord({ app, dataDir, inviteUrl }) {
       ),
   ].map(c => c.toJSON());
 
+  let discordReady = false;
+
   client.once("ready", async () => {
+    discordReady = true;
     console.log("[Discord] Logged in as " + client.user.tag);
 
     const guild = await client.guilds.fetch(guildId).catch(() => null);
@@ -427,10 +430,19 @@ function initDiscord({ app, dataDir, inviteUrl }) {
   });
 
   client.on("error", error => console.error("[Discord] Client error:", error));
-  console.log("[Discord] Token present:", Boolean(token), "Guild ID:", guildId);
-  client.login(token).catch(error => {
-    console.error("[Discord] Bot login failed:", error.message);
+  client.on("warn", message => console.warn("[Discord] Warning:", message));
+  client.on("shardError", error => console.error("[Discord] Shard error:", error.message));
+  client.on("shardDisconnect", (event, shardId) => console.error("[Discord] Shard disconnected:", shardId, event?.code, event?.reason || ""));
+  client.on("shardReconnecting", shardId => console.log("[Discord] Shard reconnecting:", shardId));
+  console.log("[Discord] Token present:", Boolean(token), "Guild ID:", guildId, "Token length:", token.length);
+  client.login(token).then(() => {
+    console.log("[Discord] Login request accepted; waiting for READY event...");
+  }).catch(error => {
+    console.error("[Discord] Bot login failed:", error?.name || "Error", error?.message || String(error));
   });
+  setTimeout(() => {
+    if (!discordReady) console.error("[Discord] Bot has not reached READY after 30 seconds.");
+  }, 30000);
 
   return client;
 }
