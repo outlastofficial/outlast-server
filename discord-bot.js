@@ -438,12 +438,24 @@ function initDiscord({ app, dataDir, inviteUrl }) {
   client.on("shardReconnecting", shardId => console.log("[Discord] Shard reconnecting:", shardId));
   console.log("[Discord] Token present:", Boolean(token), "Guild ID:", guildId, "Token length:", token.length);
   (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
     try {
-      const rest = new REST({ version: "10" }).setToken(token);
-      const me = await rest.get(Routes.user());
-      console.log("[Discord] REST authentication OK as " + me.username + " (" + me.id + ").");
+      const response = await fetch("https://discord.com/api/v10/users/@me", {
+        headers: { Authorization: "Bot " + token },
+        signal: controller.signal,
+      });
+      const body = await response.text();
+      if (!response.ok) {
+        console.error("[Discord] REST authentication failed:", response.status, body.slice(0, 300));
+      } else {
+        const me = JSON.parse(body);
+        console.log("[Discord] REST authentication OK as " + me.username + " (" + me.id + ").");
+      }
     } catch (error) {
-      console.error("[Discord] REST authentication failed:", error?.status || "", error?.code || "", error?.message || String(error));
+      console.error("[Discord] REST connection test failed:", error?.name || "Error", error?.message || String(error));
+    } finally {
+      clearTimeout(timer);
     }
   })();
   client.login(token).then(() => {
