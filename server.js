@@ -147,6 +147,10 @@ app.get('/', (req, res) => {
   });
 });
 
+app.get('/api/challenge/today',(req,res)=>{
+  res.json(challengeForDate(new Date().toISOString().slice(0,10)));
+});
+
 app.get('/api/leaderboard', (req,res)=>{
   res.json({
     version:'3.4.0',
