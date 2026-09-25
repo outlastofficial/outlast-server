@@ -15,6 +15,8 @@ const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 const LEADERBOARD_BACKUP_FILE = path.join(DATA_DIR, 'leaderboard.backup.json');
+const LEADERBOARD_MIRROR_FILE = path.join(DATA_DIR, 'leaderboard.mirror.json');
+const LEADERBOARD_JOURNAL_FILE = path.join(DATA_DIR, 'leaderboard.journal.json');
 const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -29,9 +31,24 @@ function loadFeedback() {
 }
 
 function loadJson(file, fallback) { try { const parsed=JSON.parse(fs.readFileSync(file,'utf8')); return parsed; } catch (_) { return fallback; } }
-function saveJson(file, value) { const tmp=file+'.tmp'; if(file===LEADERBOARD_FILE && fs.existsSync(file)){ try{fs.copyFileSync(file,LEADERBOARD_BACKUP_FILE);}catch(_){} } fs.writeFileSync(tmp, JSON.stringify(value,null,2),'utf8'); fs.renameSync(tmp,file); }
+function saveJson(file, value) {
+  const tmp=file+'.tmp';
+  if(file===LEADERBOARD_FILE){
+    try{ if(fs.existsSync(file)) fs.copyFileSync(file,LEADERBOARD_BACKUP_FILE); }catch(_){}
+    try{ fs.writeFileSync(LEADERBOARD_MIRROR_FILE, JSON.stringify(value,null,2),'utf8'); }catch(_){}
+    try{ fs.writeFileSync(LEADERBOARD_JOURNAL_FILE, JSON.stringify({savedAt:Date.now(),count:Array.isArray(value)?value.length:0},null,2),'utf8'); }catch(_){}
+  }
+  fs.writeFileSync(tmp, JSON.stringify(value,null,2),'utf8');
+  fs.renameSync(tmp,file);
+}
 let feedback = loadFeedback();
-let leaderboard = loadJson(LEADERBOARD_FILE, []);
+let leaderboard = loadJson(LEADERBOARD_FILE, null);
+if(!Array.isArray(leaderboard)){
+  const mirror=loadJson(LEADERBOARD_MIRROR_FILE, []);
+  const backup=loadJson(LEADERBOARD_BACKUP_FILE, []);
+  leaderboard=Array.isArray(mirror)&&mirror.length?mirror:(Array.isArray(backup)?backup:[]);
+  if(Array.isArray(leaderboard)&&leaderboard.length) saveJson(LEADERBOARD_FILE,leaderboard);
+}
 let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
 if(!Array.isArray(betaPlayers)) betaPlayers=[];
 if(!Array.isArray(leaderboard)) leaderboard=[];
@@ -49,7 +66,7 @@ function challengeForDate(dateKey){
     ['Treasure Hunt','Extra pickup opportunities appear.'],
     ['Endurance','The goal is to survive as long as possible.']
   ];
-  const m=list[h%list.length]; return {date:key,seed:h,modifier:m[0],description:m[1],version:'3.4.0'};
+  const m=list[h%list.length]; return {date:key,seed:h,modifier:m[0],description:m[1],version:'3.6.0'};
 }
 const MAX_ROOM_PLAYERS = 4;
 
@@ -141,7 +158,7 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     game: 'OUTLAST',
-    version: '3.4.0',
+    version: '3.6.0',
     players: wss.clients.size,
     feedback: feedback.length,
     rooms: rooms.size
@@ -154,7 +171,7 @@ app.get('/api/challenge/today',(req,res)=>{
 
 app.get('/api/leaderboard', (req,res)=>{
   res.json({
-    version:'3.4.0',
+    version:'3.6.0',
     persistentStorage:Boolean(process.env.OUTLAST_DATA_DIR),
     entries: leaderboard
       .slice()
@@ -185,9 +202,9 @@ app.post('/api/leaderboard',(req,res)=>{
  leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0)); leaderboard=leaderboard.slice(0,100); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming});
 });
 
-app.get('/api/health',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.4.0',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length}));
+app.get('/api/health',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.6.0',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length}));
 
-app.get('/api/coop/status',(req,res)=>res.json({version:'3.4.0',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS}));
+app.get('/api/coop/status',(req,res)=>res.json({version:'3.6.0',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS}));
 
 app.get('/api/feedback', (req, res) => {
   res.json({
