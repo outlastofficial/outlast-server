@@ -20,7 +20,7 @@ const LEADERBOARD_JOURNAL_FILE = path.join(DATA_DIR, 'leaderboard.journal.json')
 const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
 const COIN_GIFTS_FILE = path.join(DATA_DIR, 'coin-gifts.json');
 const OWNER_USERNAME = 'BestGamer';
-const OWNER_PASSWORD = process.env.OUTLAST_OWNER_PASSWORD || '1296813';
+const OWNER_PASSWORD = process.env.OUTLAST_OWNER_PASSWORD || 'LMM05232010';
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
