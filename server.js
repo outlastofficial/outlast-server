@@ -19,7 +19,7 @@ const LEADERBOARD_MIRROR_FILE = path.join(DATA_DIR, 'leaderboard.mirror.json');
 const LEADERBOARD_JOURNAL_FILE = path.join(DATA_DIR, 'leaderboard.journal.json');
 const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
 const COIN_GIFTS_FILE = path.join(DATA_DIR, 'coin-gifts.json');
-const OWNER_USERNAME = 'BestGamer';
+const OWNER_USERNAMES = ['BestGamer', 'Landon'];
 const OWNER_PASSWORD = process.env.OUTLAST_GIFT_PASSWORD || '05232010';
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -189,10 +189,10 @@ app.post('/api/owner/gift-coins',(req,res)=>{
   const password=String(req.body?.password??'');
   const target=clean(req.body?.targetUsername,18);
   const amount=Math.floor(Number(req.body?.amount));
-  if(owner.toLowerCase()!==OWNER_USERNAME.toLowerCase() || password!==OWNER_PASSWORD){
+  if(!OWNER_USERNAMES.some(name => owner.toLowerCase()===name.toLowerCase()) || password!==OWNER_PASSWORD){
     return res.status(403).json({ok:false,error:'Owner authorization required'});
   }
-  if(target.toLowerCase()===OWNER_USERNAME.toLowerCase()) return res.status(400).json({ok:false,error:'Choose another player'});
+  if(OWNER_USERNAMES.some(name => target.toLowerCase()===name.toLowerCase())) return res.status(400).json({ok:false,error:'Choose another player'});
   if(!/^[A-Za-z0-9 _-]{2,18}$/.test(target)){
     return res.status(400).json({ok:false,error:'Invalid player username'});
   }
