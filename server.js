@@ -144,7 +144,7 @@ app.post('/api/leaderboard',(req,res)=>{
  const incoming={name,score,level,kills,mode,difficulty,duration,seed,modifier,challenge,weapon,character,extracted,date:new Date().toLocaleDateString(),badge};
  const i=leaderboard.findIndex(x=>String(x.name||'').toLowerCase()===key);
  if(i>=0){if(score>Number(leaderboard[i].score||0))leaderboard[i]={...leaderboard[i],...incoming};else return res.json({ok:true,updated:false,entry:leaderboard[i]});}else leaderboard.push(incoming);
- leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0); leaderboard=leaderboard.slice(0,100); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming});
+ leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0)); leaderboard=leaderboard.slice(0,100); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming});
 });
 
 app.get('/api/health',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.8.0',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length}));
