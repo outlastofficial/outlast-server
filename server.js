@@ -105,7 +105,7 @@ function ownerPlayerList(){
 app.use(cors({origin:true}));
 app.use(express.json({limit:'32kb'}));
 
-app.get('/',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.8.0',players:wss.clients.size,feedback:feedback.length,rooms:rooms.size}));
+app.get('/',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.9.3',players:wss.clients.size,feedback:feedback.length,rooms:rooms.size}));
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
 
 app.post('/api/owner/gift-coins',(req,res)=>{
@@ -132,7 +132,7 @@ app.get('/api/owner/players',(req,res)=>{
   res.json({ok:true,players:ownerPlayerList()});
 });
 
-app.get('/api/leaderboard',(req,res)=>res.json({version:'3.8.0',persistentStorage:Boolean(process.env.OUTLAST_DATA_DIR),entries:leaderboard.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0)).slice(0,100)}));
+app.get('/api/leaderboard',(req,res)=>res.json({version:'3.9.3',persistentStorage:Boolean(process.env.OUTLAST_DATA_DIR),entries:leaderboard.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0))}));
 
 app.post('/api/leaderboard',(req,res)=>{
  const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); const now=Date.now(); const recent=leaderboardRate.get(ip)||[]; const windowed=recent.filter(t=>now-t<10*60*1000); if(windowed.length>=30)return res.status(429).json({ok:false,error:'Too many leaderboard submissions'}); windowed.push(now); leaderboardRate.set(ip,windowed);
@@ -144,11 +144,11 @@ app.post('/api/leaderboard',(req,res)=>{
  const incoming={name,score,level,kills,mode,difficulty,duration,seed,modifier,challenge,weapon,character,extracted,date:new Date().toLocaleDateString(),badge};
  const i=leaderboard.findIndex(x=>String(x.name||'').toLowerCase()===key);
  if(i>=0){if(score>Number(leaderboard[i].score||0))leaderboard[i]={...leaderboard[i],...incoming};else return res.json({ok:true,updated:false,entry:leaderboard[i]});}else leaderboard.push(incoming);
- leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0)); leaderboard=leaderboard.slice(0,100); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming});
+ leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0)); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming,totalPlayers:leaderboard.length});
 });
 
-app.get('/api/health',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.8.0',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length}));
-app.get('/api/coop/status',(req,res)=>res.json({version:'3.8.0',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS}));
+app.get('/api/health',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.9.3',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length}));
+app.get('/api/coop/status',(req,res)=>res.json({version:'3.9.3',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS}));
 app.get('/api/feedback',(req,res)=>res.json({entries:feedback.slice().sort((a,b)=>Number(b.date)-Number(a.date))}));
 app.post('/api/feedback',(req,res)=>{
   const clientId=clean(req.body?.clientId,120), user=clean(req.body?.user,18)||'Player', type=req.body?.type==='idea'?'idea':'bug', title=clean(req.body?.title,80), body=clean(req.body?.body,1000), date=Number(req.body?.date)||Date.now();
