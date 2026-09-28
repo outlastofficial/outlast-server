@@ -195,6 +195,21 @@ app.post('/api/feedback',(req,res)=>{
   const entry={id:Date.now().toString(36)+Math.random().toString(36).slice(2,8),clientId,user,type,title,body,status:'Pending',reward:0,date}; feedback.push(entry); saveFeedback(); res.status(201).json({ok:true,duplicate:false,entry});
 });
 
+function detachFromRoom(player){
+  if(!player || !player.roomCode) return;
+  const room=rooms.get(player.roomCode);
+  const oldCode=player.roomCode;
+  player.roomCode='';
+  if(!room) return;
+  room.players.delete(player.id);
+  if(room.players.size===0){
+    rooms.delete(oldCode);
+    return;
+  }
+  if(room.started && room.players.size>0) room.started=false;
+  broadcastRoom(room,{type:'room_state',...roomSnapshot(room)});
+}
+
 wss.on('connection',socket=>{
   const player={id:Math.random().toString(36).slice(2)+Date.now().toString(36),socket,username:'Player',roomCode:'',x:1600,y:1200,skinColor:'#ff9d5c',characterVisual:{body:'#ff9d5c',style:'survivor'},level:1};
   socket.__outlastPlayer=player;
