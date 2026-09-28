@@ -19,6 +19,7 @@ const LEADERBOARD_MIRROR_FILE = path.join(DATA_DIR, 'leaderboard.mirror.json');
 const LEADERBOARD_JOURNAL_FILE = path.join(DATA_DIR, 'leaderboard.journal.json');
 const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
 const COIN_GIFTS_FILE = path.join(DATA_DIR, 'coin-gifts.json');
+const GLOBAL_EVENT_FILE = path.join(DATA_DIR, 'global-event.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const OWNER_USERNAMES = ['BestGamer', 'Landon'];
 const OWNER_PASSWORD = process.env.OUTLAST_GIFT_PASSWORD || '05232010';
@@ -51,12 +52,18 @@ if(!Array.isArray(leaderboard)){
 let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
 let coinGifts = loadJson(COIN_GIFTS_FILE, {});
 let knownPlayers = loadJson(PLAYERS_FILE, []);
+let globalEvent = loadJson(GLOBAL_EVENT_FILE, {active:false});
+if(!globalEvent || typeof globalEvent!=='object') globalEvent={active:false};
 if(!coinGifts || typeof coinGifts!=='object' || Array.isArray(coinGifts)) coinGifts={};
 if(!Array.isArray(betaPlayers)) betaPlayers=[];
 if(!Array.isArray(leaderboard)) leaderboard=[];
 if(!Array.isArray(knownPlayers)) knownPlayers=[];
 
 function saveCoinGifts(){ const tmp=COIN_GIFTS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(coinGifts,null,2),'utf8'); fs.renameSync(tmp,COIN_GIFTS_FILE); }
+function saveGlobalEvent(){ const tmp=GLOBAL_EVENT_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(globalEvent,null,2),'utf8'); fs.renameSync(tmp,GLOBAL_EVENT_FILE); }
+function broadcastGlobal(payload){ for(const socket of wss.clients) send(socket,payload); }
+const GLOBAL_EVENT_LABELS={october:'🎃 October Event',double_coins:'🪙 Double Coins',double_xp:'⭐ Double XP',chaos:'⚡ Global Chaos',blackout:'🌑 Global Blackout',boss_rush:'👹 Boss Rush'};
+const ABUSE_LABELS={boss:'👹 Boss Spawn',blackout:'🌑 Blackout',speed:'💨 Enemy Speed Surge',chaos:'⚡ Chaos',powerup:'✨ Power-Up Rain',waves:'🧟 Rapid Waves',stop:'■ Admin Abuse Stopped'};
 function saveKnownPlayers(){ const tmp=PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(knownPlayers,null,2),'utf8'); fs.renameSync(tmp,PLAYERS_FILE); }
 function coinGiftKey(username){ return clean(username,18).toLowerCase(); }
 const rooms = new Map();
@@ -105,8 +112,38 @@ function ownerPlayerList(){
 app.use(cors({origin:true}));
 app.use(express.json({limit:'32kb'}));
 
-app.get('/',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.9.3',players:wss.clients.size,feedback:feedback.length,rooms:rooms.size}));
+app.get('/',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.11.0',players:wss.clients.size,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent}));
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
+
+app.get('/api/owner/global-event',(req,res)=>{res.json({ok:true,...globalEvent});});
+app.post('/api/owner/global-event',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  const action=String(req.body?.action||''); if(action==='stop'){globalEvent={active:false};saveGlobalEvent();broadcastGlobal({type:'owner_global_event',active:false});return res.json({ok:true,event:globalEvent});}
+  const eventType=String(req.body?.eventType||'october'); if(!GLOBAL_EVENT_LABELS[eventType]) return res.status(400).json({ok:false,error:'Unknown event'});
+  const minutes=Math.max(1,Math.min(1440,Math.floor(Number(req.body?.durationMinutes)||30)));
+  globalEvent={active:true,type:eventType,label:GLOBAL_EVENT_LABELS[eventType],startedAt:Date.now(),endsAt:Date.now()+minutes*60000,startedBy:clean(req.body?.ownerUsername,18)};
+  saveGlobalEvent();broadcastGlobal({type:'owner_global_event',...globalEvent});res.json({ok:true,event:globalEvent});
+});
+app.post('/api/owner/admin-abuse',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  const action=String(req.body?.action||''); if(action==='stop'){const payload={type:'owner_admin_abuse',action:'stop',label:ABUSE_LABELS.stop,active:false};broadcastGlobal(payload);return res.json({ok:true,...payload});}
+  if(!ABUSE_LABELS[action]) return res.status(400).json({ok:false,error:'Unknown admin-abuse action'});
+  const minutes=Math.max(1,Math.min(60,Math.floor(Number(req.body?.durationMinutes)||5)));
+  const payload={type:'owner_admin_abuse',action,label:ABUSE_LABELS[action],active:true,endsAt:Date.now()+minutes*60000,startedBy:clean(req.body?.ownerUsername,18)};
+  broadcastGlobal(payload);res.json({ok:true,...payload});
+});
+app.post('/api/owner/global-reward',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  const amount=Math.floor(Number(req.body?.amount)); if(!Number.isSafeInteger(amount)||amount<1||amount>100000)return res.status(400).json({ok:false,error:'Reward must be 1 to 100,000 coins'});
+  const players=ownerPlayerList().filter(p=>p.username);
+  for(const p of players){const key=coinGiftKey(p.username),existing=coinGifts[key]||{username:p.username,pending:0};existing.username=p.username;existing.pending=Math.min(1000000000,Number(existing.pending)||0)+amount;existing.updatedAt=Date.now();coinGifts[key]=existing;}
+  saveCoinGifts();res.json({ok:true,players:players.length,amount});
+});
+app.post('/api/owner/announcement',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  const message=clean(req.body?.message,240); if(!message)return res.status(400).json({ok:false,error:'Announcement is required'});
+  broadcastGlobal({type:'owner_announcement',message,from:clean(req.body?.ownerUsername,18),at:Date.now()});res.json({ok:true});
+});
 
 app.post('/api/owner/gift-coins',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
@@ -147,8 +184,8 @@ app.post('/api/leaderboard',(req,res)=>{
  leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0)); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming,totalPlayers:leaderboard.length});
 });
 
-app.get('/api/health',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.9.3',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length}));
-app.get('/api/coop/status',(req,res)=>res.json({version:'3.9.3',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS}));
+app.get('/api/health',(req,res)=>{if(globalEvent.active&&Date.now()>=Number(globalEvent.endsAt)){globalEvent={active:false};saveGlobalEvent();}res.json({status:'online',game:'OUTLAST',version:'3.11.0',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length,globalEvent});});
+app.get('/api/coop/status',(req,res)=>res.json({version:'3.11.0',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS,globalEvent:globalEvent}));
 app.get('/api/feedback',(req,res)=>res.json({entries:feedback.slice().sort((a,b)=>Number(b.date)-Number(a.date))}));
 app.post('/api/feedback',(req,res)=>{
   const clientId=clean(req.body?.clientId,120), user=clean(req.body?.user,18)||'Player', type=req.body?.type==='idea'?'idea':'bug', title=clean(req.body?.title,80), body=clean(req.body?.body,1000), date=Number(req.body?.date)||Date.now();
