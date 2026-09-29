@@ -10,6 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
+const SERVER_VERSION = '3.14.3';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -49,6 +50,7 @@ if(!Array.isArray(leaderboard)){
   leaderboard=Array.isArray(mirror)&&mirror.length?mirror:(Array.isArray(backup)?backup:[]);
   if(Array.isArray(leaderboard)&&leaderboard.length) saveJson(LEADERBOARD_FILE,leaderboard);
 }
+leaderboard=normalizeLeaderboard(leaderboard);
 let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
 let coinGifts = loadJson(COIN_GIFTS_FILE, {});
 let knownPlayers = loadJson(PLAYERS_FILE, []);
@@ -58,6 +60,37 @@ if(!coinGifts || typeof coinGifts!=='object' || Array.isArray(coinGifts)) coinGi
 if(!Array.isArray(betaPlayers)) betaPlayers=[];
 if(!Array.isArray(leaderboard)) leaderboard=[];
 if(!Array.isArray(knownPlayers)) knownPlayers=[];
+
+
+function normalizeLeaderboard(list){
+  const byName=new Map();
+  for(const raw of Array.isArray(list)?list:[]){
+    const name=clean(raw?.name,18)||'Player';
+    if(!/^[A-Za-z0-9 _-]{2,18}$/.test(name)) continue;
+    const score=Math.max(0,Math.floor(Number(raw?.score)||0));
+    const level=Math.max(1,Math.floor(Number(raw?.level)||1));
+    const kills=Math.max(0,Math.floor(Number(raw?.kills)||0));
+    const candidate={
+      id:String(raw?.id||name.toLowerCase().replace(/[^a-z0-9_-]+/g,'-')).slice(0,40),
+      name,score,level,kills,
+      mode:clean(raw?.mode,30)||'Classic',
+      difficulty:clean(raw?.difficulty,30)||'Normal',
+      duration:Math.max(0,Math.floor(Number(raw?.duration)||0)),
+      seed:clean(raw?.seed,48),
+      modifier:clean(raw?.modifier,40)||'None',
+      challenge:clean(raw?.challenge,40)||'None',
+      weapon:clean(raw?.weapon,40),
+      character:clean(raw?.character,40),
+      extracted:Boolean(raw?.extracted),
+      date:clean(raw?.date,40)||new Date().toLocaleDateString(),
+      updatedAt:Number(raw?.updatedAt)||0,
+      badge:clean(raw?.badge,20)
+    };
+    const key=name.toLowerCase(),existing=byName.get(key);
+    if(!existing||candidate.score>existing.score||candidate.updatedAt>existing.updatedAt)byName.set(key,candidate);
+  }
+  return [...byName.values()].sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(b.updatedAt||0)-Number(a.updatedAt||0)).slice(0,1000);
+}
 
 function saveCoinGifts(){ const tmp=COIN_GIFTS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(coinGifts,null,2),'utf8'); fs.renameSync(tmp,COIN_GIFTS_FILE); }
 function saveGlobalEvent(){ const tmp=GLOBAL_EVENT_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(globalEvent,null,2),'utf8'); fs.renameSync(tmp,GLOBAL_EVENT_FILE); }
@@ -112,7 +145,7 @@ function ownerPlayerList(){
 app.use(cors({origin:true}));
 app.use(express.json({limit:'32kb'}));
 
-app.get('/',(req,res)=>res.json({status:'online',game:'OUTLAST',version:'3.11.0',players:wss.clients.size,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent}));
+app.get('/',(req,res)=>res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:wss.clients.size,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent}));
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
 
 app.get('/api/owner/global-event',(req,res)=>{res.json({ok:true,...globalEvent});});
@@ -169,23 +202,66 @@ app.get('/api/owner/players',(req,res)=>{
   res.json({ok:true,players:ownerPlayerList()});
 });
 
-app.get('/api/leaderboard',(req,res)=>res.json({version:'3.9.3',persistentStorage:Boolean(process.env.OUTLAST_DATA_DIR),entries:leaderboard.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0))}));
-
-app.post('/api/leaderboard',(req,res)=>{
- const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); const now=Date.now(); const recent=leaderboardRate.get(ip)||[]; const windowed=recent.filter(t=>now-t<10*60*1000); if(windowed.length>=30)return res.status(429).json({ok:false,error:'Too many leaderboard submissions'}); windowed.push(now); leaderboardRate.set(ip,windowed);
- const name=clean(req.body?.name,18)||'Player'; const score=Math.max(0,Math.floor(Number(req.body?.score)||0)); const level=Math.max(1,Math.floor(Number(req.body?.level)||1)); const kills=Math.max(0,Math.floor(Number(req.body?.kills)||0)); const mode=clean(req.body?.mode,30)||'Classic'; const difficulty=clean(req.body?.difficulty,30)||'Normal'; const duration=Math.max(0,Math.floor(Number(req.body?.duration)||0)); const seed=clean(req.body?.seed,48); const modifier=clean(req.body?.modifier,40)||'None'; const challenge=clean(req.body?.challenge,40)||'None'; const weapon=clean(req.body?.weapon,40); const character=clean(req.body?.character,40); const extracted=Boolean(req.body?.extracted);
- if(level>10000||kills>5000000||score>1000000000)return res.status(400).json({ok:false,error:'Impossible leaderboard values'});
- if(duration>0&&duration<5&&score>1000000)return res.status(400).json({ok:false,error:'Run metadata failed validation'});
- const key=name.toLowerCase(), existing=leaderboard.find(x=>String(x.name||'').toLowerCase()===key); let badge=String(existing?.badge||''); if(key==='bestgamer')badge='OWNER'; const excluded=['tester','admin','administrator'].includes(key);
- if(!badge&&!excluded&&!betaPlayers.some(x=>String(x).toLowerCase()===key)&&betaPlayers.length<BETA_BADGE_LIMIT){betaPlayers.push(name);saveJson(BETA_PLAYERS_FILE,betaPlayers);badge='BETA';}
- const incoming={name,score,level,kills,mode,difficulty,duration,seed,modifier,challenge,weapon,character,extracted,date:new Date().toLocaleDateString(),badge};
- const i=leaderboard.findIndex(x=>String(x.name||'').toLowerCase()===key);
- if(i>=0){if(score>Number(leaderboard[i].score||0))leaderboard[i]={...leaderboard[i],...incoming};else return res.json({ok:true,updated:false,entry:leaderboard[i]});}else leaderboard.push(incoming);
- leaderboard.sort((a,b)=>Number(b.score||0)-Number(a.score||0)); saveJson(LEADERBOARD_FILE,leaderboard); res.json({ok:true,updated:true,entry:incoming,totalPlayers:leaderboard.length});
+app.get('/api/leaderboard',(req,res)=>{
+ const limit=Math.min(100,Math.max(1,Math.floor(Number(req.query?.limit)||100)));
+ leaderboard=normalizeLeaderboard(leaderboard);
+ res.set('Cache-Control','no-store');
+ res.json({ok:true,version:SERVER_VERSION,revision:2,totalPlayers:leaderboard.length,entries:leaderboard.slice(0,limit)});
 });
 
-app.get('/api/health',(req,res)=>{if(globalEvent.active&&Date.now()>=Number(globalEvent.endsAt)){globalEvent={active:false};saveGlobalEvent();}res.json({status:'online',game:'OUTLAST',version:'3.11.0',players:wss.clients.size,rooms:rooms.size,feedback:feedback.length,globalEvent});});
-app.get('/api/coop/status',(req,res)=>res.json({version:'3.11.0',rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS,globalEvent:globalEvent}));
+app.post('/api/leaderboard',(req,res)=>{
+ const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
+ const now=Date.now(),recent=leaderboardRate.get(ip)||[],windowed=recent.filter(t=>now-t<10*60*1000);
+ if(windowed.length>=30)return res.status(429).json({ok:false,error:'Too many leaderboard submissions'});
+ windowed.push(now);leaderboardRate.set(ip,windowed);
+
+ const name=clean(req.body?.name,18)||'Player';
+ if(!/^[A-Za-z0-9 _-]{2,18}$/.test(name))return res.status(400).json({ok:false,error:'Invalid player name'});
+ const score=Math.max(0,Math.floor(Number(req.body?.score)||0));
+ const level=Math.max(1,Math.floor(Number(req.body?.level)||1));
+ const kills=Math.max(0,Math.floor(Number(req.body?.kills)||0));
+ const mode=clean(req.body?.mode,30)||'Classic';
+ const difficulty=clean(req.body?.difficulty,30)||'Normal';
+ const duration=Math.max(0,Math.floor(Number(req.body?.duration)||0));
+ const seed=clean(req.body?.seed,48);
+ const modifier=clean(req.body?.modifier,40)||'None';
+ const challenge=clean(req.body?.challenge,40)||'None';
+ const weapon=clean(req.body?.weapon,40);
+ const character=clean(req.body?.character,40);
+ const extracted=Boolean(req.body?.extracted);
+ if(/1v1|pvp/i.test(mode))return res.status(400).json({ok:false,error:'PvP leaderboard records are no longer supported'});
+ if(level>10000||kills>5000000||score>1000000000)return res.status(400).json({ok:false,error:'Impossible leaderboard values'});
+ if(duration>0&&duration<5&&score>1000000)return res.status(400).json({ok:false,error:'Run metadata failed validation'});
+
+ const key=name.toLowerCase();
+ leaderboard=normalizeLeaderboard(leaderboard);
+ const existing=leaderboard.find(x=>String(x.name||'').toLowerCase()===key);
+ if(existing&&score<=Number(existing.score||0)){
+   return res.json({ok:true,updated:false,serverRecord:existing,totalPlayers:leaderboard.length});
+ }
+
+ let badge=String(existing?.badge||'');
+ if(key==='bestgamer')badge='OWNER';
+ const excluded=['tester','admin','administrator'].includes(key);
+ if(!badge&&!excluded&&!betaPlayers.some(x=>String(x).toLowerCase()===key)&&betaPlayers.length<BETA_BADGE_LIMIT){
+   betaPlayers.push(name);saveJson(BETA_PLAYERS_FILE,betaPlayers);badge='BETA';
+ }
+
+ const incoming={
+   id:String(existing?.id||key.replace(/[^a-z0-9_-]+/g,'-')).slice(0,40),
+   name,score,level,kills,mode,difficulty,duration,seed,modifier,challenge,weapon,character,extracted,
+   date:new Date().toLocaleDateString(),updatedAt:now,badge
+ };
+ const next=leaderboard.filter(x=>String(x.name||'').toLowerCase()!==key);
+ next.push(incoming);
+ leaderboard=normalizeLeaderboard(next);
+ saveJson(LEADERBOARD_FILE,leaderboard);
+ const saved=leaderboard.find(x=>String(x.name||'').toLowerCase()===key)||incoming;
+ res.json({ok:true,updated:true,entry:saved,serverRecord:saved,totalPlayers:leaderboard.length});
+});
+
+app.get('/api/health',(req,res)=>{if(globalEvent.active&&Date.now()>=Number(globalEvent.endsAt)){globalEvent={active:false};saveGlobalEvent();}res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:wss.clients.size,rooms:rooms.size,feedback:feedback.length,globalEvent});});
+app.get('/api/coop/status',(req,res)=>res.json({version:SERVER_VERSION,rooms:rooms.size,players:wss.clients.size,maxPlayers:MAX_ROOM_PLAYERS,globalEvent:globalEvent}));
 app.get('/api/feedback',(req,res)=>res.json({entries:feedback.slice().sort((a,b)=>Number(b.date)-Number(a.date))}));
 app.post('/api/feedback',(req,res)=>{
   const clientId=clean(req.body?.clientId,120), user=clean(req.body?.user,18)||'Player', type=req.body?.type==='idea'?'idea':'bug', title=clean(req.body?.title,80), body=clean(req.body?.body,1000), date=Number(req.body?.date)||Date.now();
