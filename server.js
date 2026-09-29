@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.14.3';
+const SERVER_VERSION = '3.14.12';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -195,6 +195,12 @@ app.post('/api/coins/claim',(req,res)=>{
   const key=coinGiftKey(username), gift=coinGifts[key], amount=Math.max(0,Math.floor(Number(gift?.pending)||0));
   if(amount>0){ delete coinGifts[key]; saveCoinGifts(); }
   res.json({ok:true,username,coins:amount});
+});
+
+app.post('/api/owner/verify',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  res.set('Cache-Control','no-store');
+  res.json({ok:true,owner:clean(req.body?.ownerUsername || req.query?.ownerUsername,18),verified:true});
 });
 
 app.get('/api/owner/players',(req,res)=>{
