@@ -10,10 +10,11 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.23.1';
+const SERVER_VERSION = '3.27.4';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
+const CHAT_FILE = path.join(DATA_DIR, 'chat.json');
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 const LEADERBOARD_BACKUP_FILE = path.join(DATA_DIR, 'leaderboard.backup.json');
 const LEADERBOARD_MIRROR_FILE = path.join(DATA_DIR, 'leaderboard.mirror.json');
@@ -32,6 +33,17 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 function loadFeedback() {
   try { const parsed = JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf8')); return Array.isArray(parsed) ? parsed : []; }
   catch (_) { return []; }
+}
+function loadChatHistory() {
+  try { const parsed = JSON.parse(fs.readFileSync(CHAT_FILE, 'utf8')); return Array.isArray(parsed) ? parsed.slice(-200) : []; }
+  catch (_) { return []; }
+}
+function saveChatHistory() {
+  try {
+    const tmp=CHAT_FILE+'.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(chatHistory.slice(-CHAT_MAX_HISTORY),null,2),'utf8');
+    fs.renameSync(tmp,CHAT_FILE);
+  } catch (_) {}
 }
 function loadJson(file, fallback) { try { const parsed=JSON.parse(fs.readFileSync(file,'utf8')); return parsed; } catch (_) { return fallback; } }
 function saveJson(file, value) {
@@ -108,6 +120,7 @@ function addChatMessage(username,message){
   if(!entry.message)return null;
   chatHistory.push(entry);
   if(chatHistory.length>CHAT_MAX_HISTORY)chatHistory=chatHistory.slice(-CHAT_MAX_HISTORY);
+  saveChatHistory();
   return entry;
 }
 const GLOBAL_EVENT_LABELS={october:'🎃 October Event',double_coins:'🪙 Double Coins',double_xp:'⭐ Double XP',chaos:'⚡ Global Chaos',blackout:'🌑 Global Blackout',boss_rush:'👹 Boss Rush'};
@@ -121,6 +134,7 @@ const chatHttpRate = new Map();
 const CHAT_MAX_HISTORY = 200;
 const CHAT_MESSAGE_MAX = 180;
 let chatHistory = [];
+chatHistory = loadChatHistory();
 
 function challengeForDate(dateKey){
   const key=String(dateKey||'').slice(0,10) || new Date().toISOString().slice(0,10);
