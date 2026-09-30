@@ -363,6 +363,7 @@ wss.on('connection',socket=>{
   const player={id:Math.random().toString(36).slice(2)+Date.now().toString(36),socket,username:'Player',roomCode:'',x:1600,y:1200,skinColor:'#ff9d5c',characterVisual:{body:'#ff9d5c',style:'survivor'},level:1};
   socket.__outlastPlayer=player;
   send(socket,{type:'welcome',message:'Connected to the OUTLAST server!',id:player.id});
+  send(socket,{type:'chat_history',messages:chatHistory.slice(-CHAT_MAX_HISTORY)});
   broadcastPlayerCount();
   socket.on('message',raw=>{
     let msg; try{msg=JSON.parse(raw.toString());}catch(_){return;}
