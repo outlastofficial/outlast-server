@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.14.23';
+const SERVER_VERSION = '3.23.0';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -103,12 +103,23 @@ function saveGlobalEvent(){ const tmp=GLOBAL_EVENT_FILE+'.tmp'; fs.writeFileSync
 function saveEventProgress(){ const tmp=EVENT_PROGRESS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventProgress,null,2),'utf8'); fs.renameSync(tmp,EVENT_PROGRESS_FILE); }
 function saveEventPlayers(){ const tmp=EVENT_PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventPlayers,null,2),'utf8'); fs.renameSync(tmp,EVENT_PLAYERS_FILE); }
 function broadcastGlobal(payload){ for(const socket of wss.clients) send(socket,payload); }
+function addChatMessage(username,message){
+  const entry={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),username:clean(username,18)||'Player',message:clean(message,CHAT_MESSAGE_MAX),at:Date.now()};
+  if(!entry.message)return null;
+  chatHistory.push(entry);
+  if(chatHistory.length>CHAT_MAX_HISTORY)chatHistory=chatHistory.slice(-CHAT_MAX_HISTORY);
+  return entry;
+}
 const GLOBAL_EVENT_LABELS={october:'🎃 October Event',double_coins:'🪙 Double Coins',double_xp:'⭐ Double XP',chaos:'⚡ Global Chaos',blackout:'🌑 Global Blackout',boss_rush:'👹 Boss Rush'};
 const ABUSE_LABELS={boss:'👹 Boss Spawn',blackout:'🌑 Blackout',speed:'💨 Enemy Speed Surge',chaos:'⚡ Chaos',powerup:'✨ Power-Up Rain',waves:'🧟 Rapid Waves',stop:'■ Admin Abuse Stopped'};
 function saveKnownPlayers(){ const tmp=PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(knownPlayers,null,2),'utf8'); fs.renameSync(tmp,PLAYERS_FILE); }
 function coinGiftKey(username){ return clean(username,18).toLowerCase(); }
 const rooms = new Map();
 const leaderboardRate = new Map();
+const chatRate = new Map();
+const CHAT_MAX_HISTORY = 200;
+const CHAT_MESSAGE_MAX = 180;
+let chatHistory = [];
 
 function challengeForDate(dateKey){
   const key=String(dateKey||'').slice(0,10) || new Date().toISOString().slice(0,10);
@@ -196,6 +207,12 @@ app.post('/api/players/register',(req,res)=>{
   saveKnownPlayers();
   res.set('Cache-Control','no-store');
   res.json({ok:true,username,totalPlayers:knownPlayers.length});
+});
+
+app.get('/api/owner/chat',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  res.set('Cache-Control','no-store');
+  res.json({ok:true,messages:chatHistory.slice(-CHAT_MAX_HISTORY)});
 });
 
 app.get('/api/owner/global-event',(req,res)=>{res.json({ok:true,...globalEvent});});
@@ -350,6 +367,17 @@ wss.on('connection',socket=>{
   socket.on('message',raw=>{
     let msg; try{msg=JSON.parse(raw.toString());}catch(_){return;}
     const type=msg?.type;
+    if(type==='chat_message'){
+      const now=Date.now(), key=player.id;
+      const recent=(chatRate.get(key)||[]).filter(t=>now-t<10000);
+      if(recent.length>=6){ send(socket,{type:'chat_error',error:'You are sending messages too quickly.'}); return; }
+      const message=clean(msg.message,CHAT_MESSAGE_MAX);
+      if(!message)return;
+      recent.push(now);chatRate.set(key,recent);
+      const entry=addChatMessage(player.username,message);
+      if(entry) broadcastGlobal({type:'chat_message',...entry});
+      return;
+    }
     if(type==='player_join'||type==='player_ping'){
       player.username=clean(msg.username,18)||player.username;
       if(player.username!=='Player'){
@@ -365,7 +393,7 @@ wss.on('connection',socket=>{
     if(type==='start_run'){const room=rooms.get(player.roomCode);if(!room)return send(socket,{type:'room_error',error:'Join a room first.'});room.started=true;broadcastRoom(room,{type:'room_game_start'});broadcastRoom(room,{type:'room_state',...roomSnapshot(room)});return;}
     if(type==='player_state'){const room=rooms.get(player.roomCode);if(!room)return;player.username=clean(msg.username,18)||player.username;player.x=Number.isFinite(Number(msg.x))?Math.max(0,Math.min(3200,Number(msg.x))):player.x;player.y=Number.isFinite(Number(msg.y))?Math.max(0,Math.min(2400,Number(msg.y))):player.y;player.skinColor=clean(msg.skinColor,24)||player.skinColor;player.characterVisual=msg.characterVisual&&typeof msg.characterVisual==='object'?msg.characterVisual:player.characterVisual;player.level=Math.max(1,Math.min(999,Number(msg.level)||1));broadcastRoom(room,{type:'player_state',id:player.id,username:player.username,x:player.x,y:player.y,skinColor:player.skinColor,characterVisual:player.characterVisual,level:player.level},player.id);return;}
   });
-  socket.on('close',()=>{detachFromRoom(player);if(player.username&&player.username!=='Player'){const existing=knownPlayers.find(p=>String(p.username).toLowerCase()===player.username.toLowerCase());if(existing){existing.lastSeen=Date.now();saveKnownPlayers();}}broadcastPlayerCount();});
+  socket.on('close',()=>{chatRate.delete(player.id);detachFromRoom(player);if(player.username&&player.username!=='Player'){const existing=knownPlayers.find(p=>String(p.username).toLowerCase()===player.username.toLowerCase());if(existing){existing.lastSeen=Date.now();saveKnownPlayers();}}broadcastPlayerCount();});
 });
 
 function broadcastPlayerCount(){const payload={type:'player_count',players:wss.clients.size};for(const socket of wss.clients)send(socket,payload);}
