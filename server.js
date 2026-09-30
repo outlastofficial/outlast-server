@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.23.0';
+const SERVER_VERSION = '3.23.1;'.replace(';','');
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -117,6 +117,7 @@ function coinGiftKey(username){ return clean(username,18).toLowerCase(); }
 const rooms = new Map();
 const leaderboardRate = new Map();
 const chatRate = new Map();
+const chatHttpRate = new Map();
 const CHAT_MAX_HISTORY = 200;
 const CHAT_MESSAGE_MAX = 180;
 let chatHistory = [];
@@ -214,6 +215,27 @@ app.get('/api/owner/chat',(req,res)=>{
   res.set('Cache-Control','no-store');
   res.json({ok:true,messages:chatHistory.slice(-CHAT_MAX_HISTORY)});
 });
+
+app.get('/api/chat',(req,res)=>{
+  const limit=Math.min(CHAT_MAX_HISTORY,Math.max(1,Math.floor(Number(req.query?.limit)||80)));
+  res.set('Cache-Control','no-store');
+  res.json({ok:true,messages:chatHistory.slice(-limit)});
+});
+app.post('/api/chat',(req,res)=>{
+  const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
+  const now=Date.now(),recent=(chatHttpRate.get(ip)||[]).filter(t=>now-t<10000);
+  if(recent.length>=6)return res.status(429).json({ok:false,error:'You are sending messages too quickly.'});
+  const username=clean(req.body?.username,18)||'Player';
+  const message=clean(req.body?.message,CHAT_MESSAGE_MAX);
+  if(!message)return res.status(400).json({ok:false,error:'Message is required'});
+  recent.push(now);chatHttpRate.set(ip,recent);
+  const entry=addChatMessage(username,message);
+  if(!entry)return res.status(400).json({ok:false,error:'Message is required'});
+  broadcastGlobal({type:'chat_message',...entry});
+  res.set('Cache-Control','no-store');
+  res.json({ok:true,entry});
+});
+
 
 app.get('/api/owner/global-event',(req,res)=>{res.json({ok:true,...globalEvent});});
 app.post('/api/owner/global-event',(req,res)=>{
