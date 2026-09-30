@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.4';
+const SERVER_VERSION = '3.27.5';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -232,8 +232,8 @@ app.get('/api/owner/chat',(req,res)=>{
 
 app.get('/api/chat',(req,res)=>{
   const limit=Math.min(CHAT_MAX_HISTORY,Math.max(1,Math.floor(Number(req.query?.limit)||80)));
-  res.set('Cache-Control','no-store');
-  res.json({ok:true,messages:chatHistory.slice(-limit)});
+  res.set({'Cache-Control':'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0','Pragma':'no-cache','Expires':'0'});
+  res.json({ok:true,serverVersion:SERVER_VERSION,messages:chatHistory.slice(-limit)});
 });
 app.post('/api/chat',(req,res)=>{
   const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
