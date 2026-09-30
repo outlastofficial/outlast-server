@@ -15,6 +15,7 @@ const SERVER_VERSION = '3.27.5';
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
 const CHAT_FILE = path.join(DATA_DIR, 'chat.json');
+const ANNOUNCEMENTS_FILE = path.join(DATA_DIR, 'announcements.json');
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 const LEADERBOARD_BACKUP_FILE = path.join(DATA_DIR, 'leaderboard.backup.json');
 const LEADERBOARD_MIRROR_FILE = path.join(DATA_DIR, 'leaderboard.mirror.json');
@@ -43,6 +44,17 @@ function saveChatHistory() {
     const tmp=CHAT_FILE+'.tmp';
     fs.writeFileSync(tmp, JSON.stringify(chatHistory.slice(-CHAT_MAX_HISTORY),null,2),'utf8');
     fs.renameSync(tmp,CHAT_FILE);
+  } catch (_) {}
+}
+function loadAnnouncements() {
+  try { const parsed=JSON.parse(fs.readFileSync(ANNOUNCEMENTS_FILE,'utf8')); return Array.isArray(parsed) ? parsed.slice(-100) : []; }
+  catch (_) { return []; }
+}
+function saveAnnouncements() {
+  try {
+    const tmp=ANNOUNCEMENTS_FILE+'.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(announcementHistory.slice(-100),null,2),'utf8');
+    fs.renameSync(tmp,ANNOUNCEMENTS_FILE);
   } catch (_) {}
 }
 function loadJson(file, fallback) { try { const parsed=JSON.parse(fs.readFileSync(file,'utf8')); return parsed; } catch (_) { return fallback; } }
@@ -123,6 +135,14 @@ function addChatMessage(username,message){
   saveChatHistory();
   return entry;
 }
+function addAnnouncement(message,from){
+  const entry={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),message:clean(message,ANNOUNCEMENT_MAX_MESSAGE),from:clean(from,18)||'Owner',at:Date.now()};
+  if(!entry.message)return null;
+  announcementHistory.push(entry);
+  if(announcementHistory.length>ANNOUNCEMENT_MAX_HISTORY)announcementHistory=announcementHistory.slice(-ANNOUNCEMENT_MAX_HISTORY);
+  saveAnnouncements();
+  return entry;
+}
 const GLOBAL_EVENT_LABELS={october:'🎃 October Event',double_coins:'🪙 Double Coins',double_xp:'⭐ Double XP',chaos:'⚡ Global Chaos',blackout:'🌑 Global Blackout',boss_rush:'👹 Boss Rush'};
 const ABUSE_LABELS={boss:'👹 Boss Spawn',blackout:'🌑 Blackout',speed:'💨 Enemy Speed Surge',chaos:'⚡ Chaos',powerup:'✨ Power-Up Rain',waves:'🧟 Rapid Waves',stop:'■ Admin Abuse Stopped'};
 function saveKnownPlayers(){ const tmp=PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(knownPlayers,null,2),'utf8'); fs.renameSync(tmp,PLAYERS_FILE); }
@@ -133,8 +153,12 @@ const chatRate = new Map();
 const chatHttpRate = new Map();
 const CHAT_MAX_HISTORY = 200;
 const CHAT_MESSAGE_MAX = 180;
+const ANNOUNCEMENT_MAX_HISTORY = 100;
+const ANNOUNCEMENT_MAX_MESSAGE = 240;
 let chatHistory = [];
+let announcementHistory = [];
 chatHistory = loadChatHistory();
+announcementHistory = loadAnnouncements();
 
 function challengeForDate(dateKey){
   const key=String(dateKey||'').slice(0,10) || new Date().toISOString().slice(0,10);
@@ -275,10 +299,19 @@ app.post('/api/owner/global-reward',(req,res)=>{
   for(const p of players){const key=coinGiftKey(p.username),existing=coinGifts[key]||{username:p.username,pending:0};existing.username=p.username;existing.pending=Math.min(1000000000,Number(existing.pending)||0)+amount;existing.updatedAt=Date.now();coinGifts[key]=existing;}
   saveCoinGifts();res.json({ok:true,players:players.length,amount});
 });
+app.get('/api/announcements',(req,res)=>{
+  const limit=Math.min(ANNOUNCEMENT_MAX_HISTORY,Math.max(1,Math.floor(Number(req.query?.limit)||50)));
+  res.set({'Cache-Control':'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0','Pragma':'no-cache','Expires':'0'});
+  res.json({ok:true,serverVersion:SERVER_VERSION,announcements:announcementHistory.slice(-limit)});
+});
 app.post('/api/owner/announcement',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
-  const message=clean(req.body?.message,240); if(!message)return res.status(400).json({ok:false,error:'Announcement is required'});
-  broadcastGlobal({type:'owner_announcement',message,from:clean(req.body?.ownerUsername,18),at:Date.now()});res.json({ok:true});
+  const message=clean(req.body?.message,ANNOUNCEMENT_MAX_MESSAGE); if(!message)return res.status(400).json({ok:false,error:'Announcement is required'});
+  const entry=addAnnouncement(message,req.body?.ownerUsername);
+  if(!entry)return res.status(400).json({ok:false,error:'Announcement is required'});
+  broadcastGlobal({type:'owner_announcement',...entry});
+  res.set('Cache-Control','no-store');
+  res.json({ok:true,entry});
 });
 
 app.post('/api/owner/gift-coins',(req,res)=>{
