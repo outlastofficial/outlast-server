@@ -146,6 +146,7 @@ function ownerPlayerList(){
   return [...names.values()].map(p=>({
     username:clean(p.username,18),
     online:onlineByName.has(clean(p.username,18).toLowerCase()),
+    createdAt:Number(p.createdAt)||0,
     lastSeen:Number(p.lastSeen)||0
   })).sort((a,b)=>Number(b.online)-Number(a.online)||a.username.localeCompare(b.username));
 }
@@ -179,6 +180,23 @@ app.get('/api/event/leaderboard',(req,res)=>{
   res.set('Cache-Control','no-store');res.json({ok:true,entries,progress:{points:eventProgress.points,goal:eventProgress.goal,percent:Math.min(100,eventProgress.points/eventProgress.goal*100)}});
 });
 
+
+app.post('/api/players/register',(req,res)=>{
+  const username=clean(req.body?.username,18);
+  if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)) return res.status(400).json({ok:false,error:'Invalid username'});
+  const key=username.toLowerCase();
+  const existing=knownPlayers.find(p=>String(p.username||'').toLowerCase()===key);
+  if(existing){
+    existing.username=username;
+    existing.lastSeen=Date.now();
+    existing.createdAt=Number(existing.createdAt)||Date.now();
+  }else{
+    knownPlayers.push({username,lastSeen:Date.now(),createdAt:Date.now()});
+  }
+  saveKnownPlayers();
+  res.set('Cache-Control','no-store');
+  res.json({ok:true,username,totalPlayers:knownPlayers.length});
+});
 
 app.get('/api/owner/global-event',(req,res)=>{res.json({ok:true,...globalEvent});});
 app.post('/api/owner/global-event',(req,res)=>{
@@ -336,7 +354,7 @@ wss.on('connection',socket=>{
       player.username=clean(msg.username,18)||player.username;
       if(player.username!=='Player'){
         const key=player.username.toLowerCase(), existing=knownPlayers.find(p=>String(p.username).toLowerCase()===key);
-        if(existing){existing.username=player.username;existing.lastSeen=Date.now();}else knownPlayers.push({username:player.username,lastSeen:Date.now()});
+        if(existing){existing.username=player.username;existing.lastSeen=Date.now();existing.createdAt=Number(existing.createdAt)||Date.now();}else knownPlayers.push({username:player.username,lastSeen:Date.now(),createdAt:Date.now()});
         saveKnownPlayers();
       }
       return;
