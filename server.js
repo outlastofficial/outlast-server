@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.14.12';
+const SERVER_VERSION = '3.14.23';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -21,6 +21,8 @@ const LEADERBOARD_JOURNAL_FILE = path.join(DATA_DIR, 'leaderboard.journal.json')
 const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
 const COIN_GIFTS_FILE = path.join(DATA_DIR, 'coin-gifts.json');
 const GLOBAL_EVENT_FILE = path.join(DATA_DIR, 'global-event.json');
+const EVENT_PROGRESS_FILE = path.join(DATA_DIR, 'event-progress.json');
+const EVENT_PLAYERS_FILE = path.join(DATA_DIR, 'event-players.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const OWNER_USERNAMES = ['BestGamer', 'Landon'];
 const OWNER_PASSWORD = process.env.OUTLAST_GIFT_PASSWORD || '05232010';
@@ -55,6 +57,10 @@ let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
 let coinGifts = loadJson(COIN_GIFTS_FILE, {});
 let knownPlayers = loadJson(PLAYERS_FILE, []);
 let globalEvent = loadJson(GLOBAL_EVENT_FILE, {active:false});
+let eventProgress = loadJson(EVENT_PROGRESS_FILE, {points:0,goal:5000,startedAt:Date.now(),updatedAt:0});
+let eventPlayers = loadJson(EVENT_PLAYERS_FILE, {});
+if(!eventProgress || typeof eventProgress!=='object') eventProgress={points:0,goal:5000,startedAt:Date.now(),updatedAt:0};
+if(!eventPlayers || typeof eventPlayers!=='object' || Array.isArray(eventPlayers)) eventPlayers={};
 if(!globalEvent || typeof globalEvent!=='object') globalEvent={active:false};
 if(!coinGifts || typeof coinGifts!=='object' || Array.isArray(coinGifts)) coinGifts={};
 if(!Array.isArray(betaPlayers)) betaPlayers=[];
@@ -94,6 +100,8 @@ function normalizeLeaderboard(list){
 
 function saveCoinGifts(){ const tmp=COIN_GIFTS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(coinGifts,null,2),'utf8'); fs.renameSync(tmp,COIN_GIFTS_FILE); }
 function saveGlobalEvent(){ const tmp=GLOBAL_EVENT_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(globalEvent,null,2),'utf8'); fs.renameSync(tmp,GLOBAL_EVENT_FILE); }
+function saveEventProgress(){ const tmp=EVENT_PROGRESS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventProgress,null,2),'utf8'); fs.renameSync(tmp,EVENT_PROGRESS_FILE); }
+function saveEventPlayers(){ const tmp=EVENT_PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventPlayers,null,2),'utf8'); fs.renameSync(tmp,EVENT_PLAYERS_FILE); }
 function broadcastGlobal(payload){ for(const socket of wss.clients) send(socket,payload); }
 const GLOBAL_EVENT_LABELS={october:'🎃 October Event',double_coins:'🪙 Double Coins',double_xp:'⭐ Double XP',chaos:'⚡ Global Chaos',blackout:'🌑 Global Blackout',boss_rush:'👹 Boss Rush'};
 const ABUSE_LABELS={boss:'👹 Boss Spawn',blackout:'🌑 Blackout',speed:'💨 Enemy Speed Surge',chaos:'⚡ Chaos',powerup:'✨ Power-Up Rain',waves:'🧟 Rapid Waves',stop:'■ Admin Abuse Stopped'};
@@ -147,6 +155,30 @@ app.use(express.json({limit:'32kb'}));
 
 app.get('/',(req,res)=>res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:wss.clients.size,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent}));
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
+app.get('/api/event/state',(req,res)=>{
+  const points=Math.max(0,Math.floor(Number(eventProgress.points)||0)),goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));
+  const percent=Math.min(100,points/goal*100);
+  res.set('Cache-Control','no-store');
+  res.json({ok:true,event:'october',progress:{points,goal,percent,updatedAt:Number(eventProgress.updatedAt)||0},active:Boolean(globalEvent.active),globalEvent});
+});
+app.post('/api/event/contribute',(req,res)=>{
+  const username=clean(req.body?.username,18)||'Player';
+  const points=Math.max(1,Math.min(25,Math.floor(Number(req.body?.points)||1)));
+  const reason=clean(req.body?.reason,40)||'event';
+  if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username))return res.status(400).json({ok:false,error:'Invalid username'});
+  const key=username.toLowerCase();
+  const p=eventPlayers[key]||{username,points:0,bosses:0,updatedAt:0};
+  p.username=username;p.points=Math.min(1000000,Math.max(0,Math.floor(Number(p.points)||0))+points);if(reason==='boss-clear')p.bosses=Math.min(9999,Math.floor(Number(p.bosses)||0)+1);p.updatedAt=Date.now();eventPlayers[key]=p;
+  eventProgress.points=Math.min(Math.max(1,Math.floor(Number(eventProgress.goal)||5000)),Math.floor(Number(eventProgress.points)||0)+points);eventProgress.goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));eventProgress.updatedAt=Date.now();
+  saveEventPlayers();saveEventProgress();
+  res.json({ok:true,player:p,progress:{points:eventProgress.points,goal:eventProgress.goal,percent:Math.min(100,eventProgress.points/eventProgress.goal*100),updatedAt:eventProgress.updatedAt}});
+});
+app.get('/api/event/leaderboard',(req,res)=>{
+  const limit=Math.min(100,Math.max(1,Math.floor(Number(req.query?.limit)||10)));
+  const entries=Object.values(eventPlayers).sort((a,b)=>Number(b.points||0)-Number(a.points||0)||Number(b.bosses||0)-Number(a.bosses||0)||String(a.username).localeCompare(String(b.username))).slice(0,limit);
+  res.set('Cache-Control','no-store');res.json({ok:true,entries,progress:{points:eventProgress.points,goal:eventProgress.goal,percent:Math.min(100,eventProgress.points/eventProgress.goal*100)}});
+});
+
 
 app.get('/api/owner/global-event',(req,res)=>{res.json({ok:true,...globalEvent});});
 app.post('/api/owner/global-event',(req,res)=>{
