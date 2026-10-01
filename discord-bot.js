@@ -439,7 +439,26 @@ function initDiscord({ app, dataDir, inviteUrl }) {
   client.on("shardDisconnect", (event, shardId) => console.error("[Discord] Shard disconnected:", shardId, event?.code, event?.reason || ""));
   client.on("shardReconnecting", shardId => console.log("[Discord] Shard reconnecting:", shardId));
 
+  let discordRetryTimer = null;
+
+  function scheduleDiscordRetry(delayMs){
+    const wait = Math.max(1000, Number(delayMs) || 0);
+    store.discordRetryAt = Date.now() + wait;
+    persist();
+
+    if (discordRetryTimer) clearTimeout(discordRetryTimer);
+    console.log("[Discord] Login paused until " + new Date(store.discordRetryAt).toISOString() + ".");
+
+    discordRetryTimer = setTimeout(() => {
+      discordRetryTimer = null;
+      delete store.discordRetryAt;
+      persist();
+      startDiscordLogin();
+    }, wait);
+  }
+
   async function discordPreflight(){
+
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),10000);
     try{
@@ -447,6 +466,7 @@ function initDiscord({ app, dataDir, inviteUrl }) {
       if(response.status===429){
         const retry=Number(response.headers.get("retry-after")||0);
         console.error("[Discord] Discord/Cloudflare is rate-limiting Render. Retry-after: "+retry+" seconds. Login attempt skipped.");
+        scheduleDiscordRetry(Math.max(10000, retry * 1000));
         return false;
       }
       if(!response.ok){ console.error("[Discord] Gateway preflight failed:",response.status); return false; }
@@ -455,12 +475,29 @@ function initDiscord({ app, dataDir, inviteUrl }) {
     finally{ clearTimeout(timer); }
   }
 
-  (async()=>{
+  async function startDiscordLogin(){
+    if (discordReady) return;
+
+    const savedRetryAt = Number(store.discordRetryAt || 0);
+    if (savedRetryAt > Date.now()) {
+      scheduleDiscordRetry(savedRetryAt - Date.now());
+      return;
+    }
+    if (savedRetryAt) {
+      delete store.discordRetryAt;
+      persist();
+    }
+
     const ok=await discordPreflight();
     if(!ok)return;
-    client.login(token).then(()=>console.log("[Discord] Login request accepted; waiting for READY event...")).catch(error=>console.error("[Discord] Bot login failed:",error?.name||"Error",error?.message||String(error)));
+
+    client.login(token)
+      .then(()=>console.log("[Discord] Login request accepted; waiting for READY event..."))
+      .catch(error=>console.error("[Discord] Bot login failed:",error?.name||"Error",error?.message||String(error)));
     setTimeout(()=>{if(!discordReady)console.error("[Discord] Bot has not reached READY after 30 seconds.");},30000);
-  })();
+  }
+
+  startDiscordLogin();
 
   return client;
 }
