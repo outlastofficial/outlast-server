@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.19';
+const SERVER_VERSION = '3.28.0';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -26,7 +26,7 @@ const GLOBAL_EVENT_FILE = path.join(DATA_DIR, 'global-event.json');
 const EVENT_PROGRESS_FILE = path.join(DATA_DIR, 'event-progress.json');
 const EVENT_PLAYERS_FILE = path.join(DATA_DIR, 'event-players.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
-const OWNER_USERNAMES = ['BestGamer', 'Landon', 'Poke'];
+const OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke'];
 const CHAT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke'];
 const CHAT_TESTER_USERNAMES = ['Max'];
 const OWNER_PASSWORD = process.env.OUTLAST_GIFT_PASSWORD || '05232010';
@@ -83,6 +83,7 @@ let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
 let coinGifts = loadJson(COIN_GIFTS_FILE, {});
 let knownPlayers = loadJson(PLAYERS_FILE, []);
 let globalEvent = loadJson(GLOBAL_EVENT_FILE, {active:false});
+let adminAbuse={active:false,action:'',label:'',startedAt:0,endsAt:0,startedBy:''};
 let eventProgress = loadJson(EVENT_PROGRESS_FILE, {points:0,goal:5000,startedAt:Date.now(),updatedAt:0});
 let eventPlayers = loadJson(EVENT_PLAYERS_FILE, {});
 if(!eventProgress || typeof eventProgress!=='object') eventProgress={points:0,goal:5000,startedAt:Date.now(),updatedAt:0};
@@ -150,7 +151,7 @@ function addAnnouncement(message,from){
   return entry;
 }
 const GLOBAL_EVENT_LABELS={october:'🎃 October Event',double_coins:'🪙 Double Coins',double_xp:'⭐ Double XP',chaos:'⚡ Global Chaos',blackout:'🌑 Global Blackout',boss_rush:'👹 Boss Rush'};
-const ABUSE_LABELS={boss:'👹 Boss Spawn',blackout:'🌑 Blackout',speed:'💨 Enemy Speed Surge',chaos:'⚡ Chaos',powerup:'✨ Power-Up Rain',waves:'🧟 Rapid Waves',stop:'■ Admin Abuse Stopped'};
+const ABUSE_LABELS={boss:'👹 Boss Spawn',blackout:'🌑 Blackout',speed:'💨 Enemy Speed Surge',chaos:'⚡ Chaos',powerup:'✨ Power-Up Rain',waves:'🧟 Rapid Waves',meteor:'☄️ Meteor Shower',swarm:'🧟 Mega Swarm',lootstorm:'💎 Loot Storm',frenzy:'🔥 Enemy Frenzy',stop:'■ Admin Abuse Stopped'};
 function saveKnownPlayers(){ const tmp=PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(knownPlayers,null,2),'utf8'); fs.renameSync(tmp,PLAYERS_FILE); }
 function coinGiftKey(username){ return clean(username,18).toLowerCase(); }
 const rooms = new Map();
@@ -210,7 +211,7 @@ function ownerPlayerList(){
 app.use(cors({origin:true}));
 app.use(express.json({limit:'32kb'}));
 
-app.get('/',(req,res)=>{const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent});});
+app.get('/',(req,res)=>{const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent,adminAbuse});});
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
 app.get('/api/event/state',(req,res)=>{
   const points=Math.max(0,Math.floor(Number(eventProgress.points)||0)),goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));
@@ -290,13 +291,28 @@ app.post('/api/owner/global-event',(req,res)=>{
   globalEvent={active:true,type:eventType,label:GLOBAL_EVENT_LABELS[eventType],startedAt:Date.now(),endsAt:Date.now()+minutes*60000,startedBy:clean(req.body?.ownerUsername,18)};
   saveGlobalEvent();broadcastGlobal({type:'owner_global_event',...globalEvent});res.json({ok:true,event:globalEvent});
 });
+app.get('/api/owner/admin-abuse',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  if(adminAbuse.active&&Date.now()>=Number(adminAbuse.endsAt||0)){
+    adminAbuse={active:false,action:'',label:'',startedAt:0,endsAt:0,startedBy:''};
+  }
+  res.set('Cache-Control','no-store');
+  res.json({ok:true,...adminAbuse});
+});
 app.post('/api/owner/admin-abuse',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
-  const action=String(req.body?.action||''); if(action==='stop'){const payload={type:'owner_admin_abuse',action:'stop',label:ABUSE_LABELS.stop,active:false};broadcastGlobal(payload);return res.json({ok:true,...payload});}
+  const action=String(req.body?.action||'');
+  if(action==='stop'){
+    adminAbuse={active:false,action:'',label:'',startedAt:0,endsAt:0,startedBy:''};
+    const payload={type:'owner_admin_abuse',action:'stop',label:ABUSE_LABELS.stop,active:false,endsAt:0};
+    broadcastGlobal(payload);
+    return res.json({ok:true,...payload});
+  }
   if(!ABUSE_LABELS[action]) return res.status(400).json({ok:false,error:'Unknown admin-abuse action'});
   const minutes=Math.max(1,Math.min(60,Math.floor(Number(req.body?.durationMinutes)||5)));
-  const payload={type:'owner_admin_abuse',action,label:ABUSE_LABELS[action],active:true,endsAt:Date.now()+minutes*60000,startedBy:clean(req.body?.ownerUsername,18)};
-  broadcastGlobal(payload);res.json({ok:true,...payload});
+  adminAbuse={active:true,action,label:ABUSE_LABELS[action],startedAt:Date.now(),endsAt:Date.now()+minutes*60000,startedBy:clean(req.body?.ownerUsername,18)};
+  broadcastGlobal({type:'owner_admin_abuse',...adminAbuse});
+  res.json({ok:true,...adminAbuse});
 });
 app.post('/api/owner/global-reward',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
