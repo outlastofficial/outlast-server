@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.28.0';
+const SERVER_VERSION = '3.28.1';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -28,7 +28,7 @@ const EVENT_PLAYERS_FILE = path.join(DATA_DIR, 'event-players.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke'];
 const CHAT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke'];
-const CHAT_TESTER_USERNAMES = ['Max'];
+const CHAT_TESTER_USERNAMES = ['Max', 'SS'];
 const OWNER_PASSWORD = process.env.OUTLAST_GIFT_PASSWORD || '05232010';
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
