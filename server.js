@@ -211,7 +211,7 @@ function ownerPlayerList(){
 app.use(cors({origin:true}));
 app.use(express.json({limit:'32kb'}));
 
-app.get('/',(req,res)=>{const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent,adminAbuse});});
+app.get('/',(req,res)=>{const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent});});
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
 app.get('/api/event/state',(req,res)=>{
   const points=Math.max(0,Math.floor(Number(eventProgress.points)||0)),goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));
