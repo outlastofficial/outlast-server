@@ -27,7 +27,7 @@ const EVENT_PROGRESS_FILE = path.join(DATA_DIR, 'event-progress.json');
 const EVENT_PLAYERS_FILE = path.join(DATA_DIR, 'event-players.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const OWNER_USERNAMES = ['BestGamer', 'Landon', 'Poke'];
-const CHAT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon'];
+const CHAT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke'];
 const OWNER_PASSWORD = process.env.OUTLAST_GIFT_PASSWORD || '05232010';
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
