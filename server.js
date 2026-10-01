@@ -368,9 +368,12 @@ app.get('/api/owner/players',(req,res)=>{
 
 app.get('/api/leaderboard',(req,res)=>{
  const limit=Math.min(100,Math.max(1,Math.floor(Number(req.query?.limit)||100)));
+ const requestedMode=clean(req.query?.mode,30);
+ const requestedDifficulty=clean(req.query?.difficulty,30);
  leaderboard=normalizeLeaderboard(leaderboard);
+ const filtered=leaderboard.filter(x=>(!requestedMode||String(x.mode||'Classic').toLowerCase()===requestedMode.toLowerCase())&&(!requestedDifficulty||String(x.difficulty||'Normal').toLowerCase()===requestedDifficulty.toLowerCase()));
  res.set('Cache-Control','no-store');
- res.json({ok:true,version:SERVER_VERSION,revision:2,totalPlayers:leaderboard.length,entries:leaderboard.slice(0,limit)});
+ res.json({ok:true,version:SERVER_VERSION,revision:3,totalPlayers:filtered.length,entries:filtered.slice(0,limit)});
 });
 
 app.post('/api/leaderboard',(req,res)=>{
@@ -398,8 +401,9 @@ app.post('/api/leaderboard',(req,res)=>{
  if(duration>0&&duration<5&&score>1000000)return res.status(400).json({ok:false,error:'Run metadata failed validation'});
 
  const key=name.toLowerCase();
+ const recordKey=key+'|'+mode.toLowerCase()+'|'+difficulty.toLowerCase();
  leaderboard=normalizeLeaderboard(leaderboard);
- const existing=leaderboard.find(x=>String(x.name||'').toLowerCase()===key);
+ const existing=leaderboard.find(x=>String(x.name||'').toLowerCase()+'|'+String(x.mode||'Classic').toLowerCase()+'|'+String(x.difficulty||'Normal').toLowerCase()===recordKey);
  if(existing&&score<=Number(existing.score||0)){
    return res.json({ok:true,updated:false,serverRecord:existing,totalPlayers:leaderboard.length});
  }
@@ -416,11 +420,11 @@ app.post('/api/leaderboard',(req,res)=>{
    name,score,level,kills,mode,difficulty,duration,seed,modifier,challenge,weapon,character,extracted,
    date:new Date().toLocaleDateString(),updatedAt:now,badge
  };
- const next=leaderboard.filter(x=>String(x.name||'').toLowerCase()!==key);
+ const next=leaderboard.filter(x=>String(x.name||'').toLowerCase()+'|'+String(x.mode||'Classic').toLowerCase()+'|'+String(x.difficulty||'Normal').toLowerCase()!==recordKey);
  next.push(incoming);
  leaderboard=normalizeLeaderboard(next);
  saveJson(LEADERBOARD_FILE,leaderboard);
- const saved=leaderboard.find(x=>String(x.name||'').toLowerCase()===key)||incoming;
+ const saved=leaderboard.find(x=>String(x.name||'').toLowerCase()+'|'+String(x.mode||'Classic').toLowerCase()+'|'+String(x.difficulty||'Normal').toLowerCase()===recordKey)||incoming;
  res.json({ok:true,updated:true,entry:saved,serverRecord:saved,totalPlayers:leaderboard.length});
 });
 
