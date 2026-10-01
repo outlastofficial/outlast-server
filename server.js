@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.6';
+const SERVER_VERSION = '3.27.17';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -458,6 +458,7 @@ wss.on('connection',socket=>{
         if(existing){existing.username=player.username;existing.lastSeen=Date.now();existing.createdAt=Number(existing.createdAt)||Date.now();}else knownPlayers.push({username:player.username,lastSeen:Date.now(),createdAt:Date.now()});
         saveKnownPlayers();
       }
+      broadcastPlayerCount();
       return;
     }
     if(type==='create_room'){detachFromRoom(player);const code=roomCode();const room={code,started:false,players:new Map()};rooms.set(code,room);player.roomCode=code;player.username=clean(msg.username,18)||player.username;room.players.set(player.id,player);send(socket,{type:'room_created',...roomSnapshot(room),selfId:player.id});return;}
@@ -469,6 +470,21 @@ wss.on('connection',socket=>{
   socket.on('close',()=>{chatRate.delete(player.id);detachFromRoom(player);if(player.username&&player.username!=='Player'){const existing=knownPlayers.find(p=>String(p.username).toLowerCase()===player.username.toLowerCase());if(existing){existing.lastSeen=Date.now();saveKnownPlayers();}}broadcastPlayerCount();});
 });
 
-function broadcastPlayerCount(){const payload={type:'player_count',players:wss.clients.size};for(const socket of wss.clients)send(socket,payload);}
+function connectedPlayerSnapshot(){
+  const byName=new Map();
+  for(const socket of wss.clients){
+    const player=socket.__outlastPlayer;
+    const username=clean(player?.username,18);
+    if(!username||username==='Player')continue;
+    const key=username.toLowerCase();
+    if(!byName.has(key))byName.set(key,{username});
+  }
+  return [...byName.values()].sort((a,b)=>a.username.localeCompare(b.username));
+}
+function broadcastPlayerCount(){
+  const onlinePlayers=connectedPlayerSnapshot();
+  const payload={type:'player_count',players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers};
+  for(const socket of wss.clients)send(socket,payload);
+}
 initDiscord({app,dataDir:DATA_DIR,inviteUrl:'https://discord.gg/bCMdZfggQ'});
 server.listen(PORT,'0.0.0.0',()=>console.log(`OUTLAST server running on port ${PORT}`));
