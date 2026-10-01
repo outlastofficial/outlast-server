@@ -119,7 +119,7 @@ function normalizeLeaderboard(list){
       updatedAt:Number(raw?.updatedAt)||0,
       badge:clean(raw?.badge,20)
     };
-    const key=name.toLowerCase(),existing=byName.get(key);
+    const key=name.toLowerCase()+'|'+candidate.mode.toLowerCase()+'|'+candidate.difficulty.toLowerCase(),existing=byName.get(key);
     if(!existing||candidate.score>existing.score||candidate.updatedAt>existing.updatedAt)byName.set(key,candidate);
   }
   return [...byName.values()].sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(b.updatedAt||0)-Number(a.updatedAt||0)).slice(0,1000);
