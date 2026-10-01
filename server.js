@@ -27,6 +27,7 @@ const EVENT_PROGRESS_FILE = path.join(DATA_DIR, 'event-progress.json');
 const EVENT_PLAYERS_FILE = path.join(DATA_DIR, 'event-players.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const OWNER_USERNAMES = ['BestGamer', 'Landon', 'Poke'];
+const CHAT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon'];
 const OWNER_PASSWORD = process.env.OUTLAST_GIFT_PASSWORD || '05232010';
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -128,7 +129,9 @@ function saveEventProgress(){ const tmp=EVENT_PROGRESS_FILE+'.tmp'; fs.writeFile
 function saveEventPlayers(){ const tmp=EVENT_PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventPlayers,null,2),'utf8'); fs.renameSync(tmp,EVENT_PLAYERS_FILE); }
 function broadcastGlobal(payload){ for(const socket of wss.clients) send(socket,payload); }
 function addChatMessage(username,message){
-  const entry={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),username:clean(username,18)||'Player',message:clean(message,CHAT_MESSAGE_MAX),at:Date.now()};
+  const cleanUsername=clean(username,18)||'Player';
+  const owner=CHAT_OWNER_USERNAMES.some(name=>name.toLowerCase()===cleanUsername.toLowerCase());
+  const entry={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),username:cleanUsername,message:clean(message,CHAT_MESSAGE_MAX),at:Date.now(),role:owner?'owner':'player'};
   if(!entry.message)return null;
   chatHistory.push(entry);
   if(chatHistory.length>CHAT_MAX_HISTORY)chatHistory=chatHistory.slice(-CHAT_MAX_HISTORY);
