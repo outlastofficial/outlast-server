@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.18';
+const SERVER_VERSION = '3.27.19';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -28,6 +28,7 @@ const EVENT_PLAYERS_FILE = path.join(DATA_DIR, 'event-players.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const OWNER_USERNAMES = ['BestGamer', 'Landon', 'Poke'];
 const CHAT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke'];
+const CHAT_TESTER_USERNAMES = ['Max'];
 const OWNER_PASSWORD = process.env.OUTLAST_GIFT_PASSWORD || '05232010';
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -131,7 +132,9 @@ function broadcastGlobal(payload){ for(const socket of wss.clients) send(socket,
 function addChatMessage(username,message){
   const cleanUsername=clean(username,18)||'Player';
   const owner=CHAT_OWNER_USERNAMES.some(name=>name.toLowerCase()===cleanUsername.toLowerCase());
-  const entry={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),username:cleanUsername,message:clean(message,CHAT_MESSAGE_MAX),at:Date.now(),role:owner?'owner':'player'};
+  const tester=CHAT_TESTER_USERNAMES.some(name=>name.toLowerCase()===cleanUsername.toLowerCase());
+  const role=owner?'owner':(tester?'tester':'player');
+  const entry={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),username:cleanUsername,message:clean(message,CHAT_MESSAGE_MAX),at:Date.now(),role};
   if(!entry.message)return null;
   chatHistory.push(entry);
   if(chatHistory.length>CHAT_MAX_HISTORY)chatHistory=chatHistory.slice(-CHAT_MAX_HISTORY);
