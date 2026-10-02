@@ -83,6 +83,10 @@ let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
 let coinGifts = loadJson(COIN_GIFTS_FILE, {});
 let knownPlayers = loadJson(PLAYERS_FILE, []);
 let globalEvent = loadJson(GLOBAL_EVENT_FILE, {active:false});
+if(String(process.env.TEST_MODE||'').toLowerCase()==='true' && !globalEvent.active){
+  globalEvent={active:true,type:'october',label:'🎃 October Event',startedAt:Date.now(),endsAt:Date.now()+30*60000,startedBy:'TEST'};
+  saveGlobalEvent();
+}
 let adminAbuse={active:false,action:'',label:'',startedAt:0,endsAt:0,startedBy:''};
 let eventProgress = loadJson(EVENT_PROGRESS_FILE, {points:0,goal:5000,startedAt:Date.now(),updatedAt:0});
 let eventPlayers = loadJson(EVENT_PLAYERS_FILE, {});
