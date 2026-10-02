@@ -10,7 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.28.2';
+const SERVER_VERSION = '3.27.45';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -214,6 +214,11 @@ app.use(express.json({limit:'32kb'}));
 app.get('/',(req,res)=>{const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent});});
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
 app.get('/api/event/state',(req,res)=>{
+  if(globalEvent.active&&Date.now()>=Number(globalEvent.endsAt||0)){
+    globalEvent={active:false};
+    saveGlobalEvent();
+    broadcastGlobal({type:'owner_global_event',active:false});
+  }
   const points=Math.max(0,Math.floor(Number(eventProgress.points)||0)),goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));
   const percent=Math.min(100,points/goal*100);
   res.set('Cache-Control','no-store');
@@ -429,7 +434,7 @@ app.post('/api/leaderboard',(req,res)=>{
 });
 
 app.get('/api/health',(req,res)=>{if(globalEvent.active&&Date.now()>=Number(globalEvent.endsAt)){globalEvent={active:false};saveGlobalEvent();}const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,rooms:rooms.size,feedback:feedback.length,globalEvent});});
-app.get('/api/coop/status',(req,res)=>{const onlinePlayers=connectedPlayerSnapshot();res.json({version:SERVER_VERSION,rooms:rooms.size,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,maxPlayers:MAX_ROOM_PLAYERS,globalEvent:globalEvent});});
+app.get('/api/coop/status',(req,res)=>{if(globalEvent.active&&Date.now()>=Number(globalEvent.endsAt||0)){globalEvent={active:false};saveGlobalEvent();broadcastGlobal({type:'owner_global_event',active:false});}const onlinePlayers=connectedPlayerSnapshot();res.json({version:SERVER_VERSION,rooms:rooms.size,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,maxPlayers:MAX_ROOM_PLAYERS,globalEvent:globalEvent});});
 app.get('/api/feedback',(req,res)=>res.json({entries:feedback.slice().sort((a,b)=>Number(b.date)-Number(a.date))}));
 app.post('/api/feedback',(req,res)=>{
   const clientId=clean(req.body?.clientId,120), user=clean(req.body?.user,18)||'Player', type=req.body?.type==='idea'?'idea':'bug', title=clean(req.body?.title,80), body=clean(req.body?.body,1000), date=Number(req.body?.date)||Date.now();
