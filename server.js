@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.45';
+const SERVER_VERSION = '3.27.47';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -152,37 +152,20 @@ async function upsertLeaderboardDb(entry){
 }
 async function readLeaderboardDb(mode,difficulty,limit){
   if(!leaderboardPool || !leaderboardDbReady) return null;
-  const values=[]; const where=[];
-  if(mode){values.push(mode);where.push('LOWER(mode)=LOWER((list){
-  const byName=new Map();
-  for(const raw of Array.isArray(list)?list:[]){
-    const name=clean(raw?.name,18)||'Player';
-    if(!/^[A-Za-z0-9 _-]{2,18}$/.test(name)) continue;
-    const score=Math.max(0,Math.floor(Number(raw?.score)||0));
-    const level=Math.max(1,Math.floor(Number(raw?.level)||1));
-    const kills=Math.max(0,Math.floor(Number(raw?.kills)||0));
-    const candidate={
-      id:String(raw?.id||name.toLowerCase().replace(/[^a-z0-9_-]+/g,'-')).slice(0,40),
-      name,score,level,kills,
-      mode:clean(raw?.mode,30)||'Classic',
-      difficulty:clean(raw?.difficulty,30)||'Normal',
-      duration:Math.max(0,Math.floor(Number(raw?.duration)||0)),
-      seed:clean(raw?.seed,48),
-      modifier:clean(raw?.modifier,40)||'None',
-      challenge:clean(raw?.challenge,40)||'None',
-      weapon:clean(raw?.weapon,40),
-      character:clean(raw?.character,40),
-      extracted:Boolean(raw?.extracted),
-      date:clean(raw?.date,40)||new Date().toLocaleDateString(),
-      updatedAt:Number(raw?.updatedAt)||0,
-      badge:clean(raw?.badge,20)
-    };
-    const key=name.toLowerCase()+'|'+candidate.mode.toLowerCase()+'|'+candidate.difficulty.toLowerCase(),existing=byName.get(key);
-    if(!existing||candidate.score>existing.score||candidate.updatedAt>existing.updatedAt)byName.set(key,candidate);
-  }
-  return [...byName.values()].sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(b.updatedAt||0)-Number(a.updatedAt||0)).slice(0,1000);
+  const values=[];
+  const where=[];
+  if(mode){values.push(mode);where.push('LOWER(mode)=LOWER($'+values.length+')');}
+  if(difficulty){values.push(difficulty);where.push('LOWER(difficulty)=LOWER($'+values.length+')');}
+  const whereSql=where.length?' WHERE '+where.join(' AND '):'';
+  values.push(Math.min(1000,Math.max(1,Number(limit)||100)));
+  const limitParam='$'+values.length;
+  const result=await leaderboardPool.query(
+    'SELECT id,name,score,level,kills,mode,difficulty,duration,seed,modifier,challenge,weapon,character,extracted,date,updated_at AS "updatedAt",NULL AS badge FROM outlast_leaderboard'+
+    whereSql+' ORDER BY score DESC, updated_at DESC LIMIT '+limitParam,
+    values
+  );
+  return result.rows.map(x=>({...x,score:Number(x.score||0),kills:Number(x.kills||0),level:Number(x.level||1),updatedAt:Number(x.updatedAt||0)}));
 }
-
 function saveCoinGifts(){ const tmp=COIN_GIFTS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(coinGifts,null,2),'utf8'); fs.renameSync(tmp,COIN_GIFTS_FILE); }
 function saveGlobalEvent(){ const tmp=GLOBAL_EVENT_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(globalEvent,null,2),'utf8'); fs.renameSync(tmp,GLOBAL_EVENT_FILE); }
 function saveEventProgress(){ const tmp=EVENT_PROGRESS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventProgress,null,2),'utf8'); fs.renameSync(tmp,EVENT_PROGRESS_FILE); }
