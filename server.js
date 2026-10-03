@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.72';
+const SERVER_VERSION = '3.27.82';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -261,6 +261,10 @@ function ownerPlayerList(){
 }
 
 app.use(cors({origin:true}));
+// Multiplayer health endpoints.
+app.get('/health',(_req,res)=>res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size}));
+app.get('/api/health',(_req,res)=>res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size}));
+
 app.use(express.json({limit:'32kb'}));
 
 app.get('/',(req,res)=>{expireGlobalEventIfNeeded();const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent});});
@@ -515,7 +519,20 @@ function detachFromRoom(player){
   broadcastRoom(room,{type:'room_state',...roomSnapshot(room)});
 }
 
+// WebSocket heartbeat keeps live multiplayer sessions from being dropped by idle infrastructure.
+const WS_HEARTBEAT_MS=25000;
+const wsHeartbeat=setInterval(()=>{
+  for(const socket of wss.clients){
+    if(socket.__outlastAlive===false){try{socket.terminate();}catch(_){}continue;}
+    socket.__outlastAlive=false;
+    try{socket.ping();}catch(_){try{socket.terminate();}catch(__){}}
+  }
+},WS_HEARTBEAT_MS);
+wss.on('close',()=>clearInterval(wsHeartbeat));
+
 wss.on('connection',socket=>{
+  socket.__outlastAlive=true;
+  socket.on('pong',()=>{socket.__outlastAlive=true;});
   const player={id:Math.random().toString(36).slice(2)+Date.now().toString(36),socket,username:'Player',roomCode:'',x:1600,y:1200,skinColor:'#ff9d5c',characterVisual:{body:'#ff9d5c',style:'survivor'},level:1};
   socket.__outlastPlayer=player;
   send(socket,{type:'welcome',message:'Connected to the OUTLAST server!',id:player.id});
