@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.82';
+const SERVER_VERSION = '3.27.90';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -395,8 +395,11 @@ app.post('/api/owner/announcement',(req,res)=>{
 
 app.post('/api/owner/gift-coins',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  const owner=clean(req.body?.ownerUsername || req.query?.ownerUsername,18);
   const target=clean(req.body?.targetUsername,18), amount=Math.floor(Number(req.body?.amount));
-  if(OWNER_USERNAMES.some(name=>target.toLowerCase()===name.toLowerCase())) return res.status(400).json({ok:false,error:'Choose another player'});
+  const targetIsOwner=OWNER_USERNAMES.some(name=>target.toLowerCase()===name.toLowerCase());
+  const ownerTargetsSelf=targetIsOwner && target.toLowerCase()===owner.toLowerCase();
+  if(targetIsOwner&&!ownerTargetsSelf) return res.status(400).json({ok:false,error:'You can only gift an owner account to yourself'});
   if(!/^[A-Za-z0-9 _-]{2,18}$/.test(target)) return res.status(400).json({ok:false,error:'Invalid player username'});
   if(!Number.isSafeInteger(amount)||amount<1||amount>10000000) return res.status(400).json({ok:false,error:'Coin amount must be a whole number from 1 to 10,000,000'});
   const key=coinGiftKey(target), existing=coinGifts[key]||{username:target,pending:0};
