@@ -452,7 +452,7 @@ app.post('/api/leaderboard',(req,res)=>{
  res.json({ok:true,updated:true,entry:saved,serverRecord:saved,totalPlayers:leaderboard.length});
 });
 
-app.get('/api/health',(req,res)=>{if(globalEvent.active&&Date.now()>=Number(globalEvent.endsAt)){globalEvent={active:false};saveGlobalEvent();}const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,rooms:rooms.size,feedback:feedback.length,globalEvent});});
+app.get('/api/health',(req,res)=>{if(globalEvent.active&&Date.now()>=Number(globalEvent.endsAt)){globalEvent={active:false};saveGlobalEvent();}const schedule=eventScheduleState();const octoberActive=schedule.live||(globalEvent.active&&String(globalEvent.type||'')==='october');const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,rooms:rooms.size,feedback:feedback.length,globalEvent:octoberActive?globalEvent:{active:false},eventSchedule:{id:schedule.id,type:schedule.type,scheduledStartAt:schedule.startAt,serverNow:schedule.serverNow,live:schedule.live}});});
 app.get('/api/coop/status',(req,res)=>{const onlinePlayers=connectedPlayerSnapshot();res.json({version:SERVER_VERSION,rooms:rooms.size,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,maxPlayers:MAX_ROOM_PLAYERS,globalEvent:globalEvent});});
 app.get('/api/feedback',(req,res)=>res.json({entries:feedback.slice().sort((a,b)=>Number(b.date)-Number(a.date))}));
 app.post('/api/feedback',(req,res)=>{
