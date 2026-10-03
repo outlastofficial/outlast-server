@@ -133,6 +133,9 @@ function saveCoinGifts(){ const tmp=COIN_GIFTS_FILE+'.tmp'; fs.writeFileSync(tmp
 function saveGlobalEvent(){ const tmp=GLOBAL_EVENT_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(globalEvent,null,2),'utf8'); fs.renameSync(tmp,GLOBAL_EVENT_FILE); }
 function saveEventProgress(){ const tmp=EVENT_PROGRESS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventProgress,null,2),'utf8'); fs.renameSync(tmp,EVENT_PROGRESS_FILE); }
 function saveEventPlayers(){ const tmp=EVENT_PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventPlayers,null,2),'utf8'); fs.renameSync(tmp,EVENT_PLAYERS_FILE); }
+function eventScheduleState(){ const serverNow=Date.now(); return {id:EVENT_SCHEDULE.id,type:EVENT_SCHEDULE.type,startAt:EVENT_SCHEDULE.startAt,serverNow,live:serverNow>=EVENT_SCHEDULE.startAt}; }
+function eventContributionRequestKey(req,username){ const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); return ip+'|'+String(username||'Player').toLowerCase(); }
+function allowEventContribution(req,username,points){ const now=Date.now(),key=eventContributionRequestKey(req,username); const recent=(eventContributionRate.get(key)||[]).filter(x=>now-x.at<EVENT_CONTRIBUTION_WINDOW_MS); const used=recent.reduce((n,x)=>n+Number(x.points||0),0); if(used+points>EVENT_CONTRIBUTION_POINT_LIMIT){ eventContributionRate.set(key,recent); return {ok:false,retryAfter:Math.max(1,Math.ceil((EVENT_CONTRIBUTION_WINDOW_MS-(now-(recent[0]?.at||now)))/1000))}; } recent.push({at:now,points}); eventContributionRate.set(key,recent); if(eventContributionRate.size>5000){ for(const [k,v] of eventContributionRate){ if(!v.length||now-v[v.length-1].at>EVENT_CONTRIBUTION_WINDOW_MS)eventContributionRate.delete(k); } } return {ok:true}; }
 function broadcastGlobal(payload){ for(const socket of wss.clients) send(socket,payload); }
 function addChatMessage(username,message){
   const cleanUsername=clean(username,18)||'Player';
@@ -155,6 +158,11 @@ function addAnnouncement(message,from){
   return entry;
 }
 const GLOBAL_EVENT_LABELS={october:'🎃 October Event',double_coins:'🪙 Double Coins',double_xp:'⭐ Double XP',chaos:'⚡ Global Chaos',blackout:'🌑 Global Blackout',boss_rush:'👹 Boss Rush'};
+const EVENT_SCHEDULE={id:'nightfall-october-2026',type:'october',startAt:Date.UTC(2026,9,3,15,0,0)};
+const EVENT_CONTRIBUTION_WINDOW_MS=60000;
+const EVENT_CONTRIBUTION_POINT_LIMIT=50;
+const EVENT_PLAYER_MAX_POINTS=5000;
+const EVENT_REASON_LIMITS={clue:5,mission:2,'boss-summon':10,'boss-clear':15,'event-run':3,encounter:2};
 const ABUSE_LABELS={boss:'👹 Boss Spawn',blackout:'🌑 Blackout',speed:'💨 Enemy Speed Surge',chaos:'⚡ Chaos',powerup:'✨ Power-Up Rain',waves:'🧟 Rapid Waves',meteor:'☄️ Meteor Shower',swarm:'🧟 Mega Swarm',lootstorm:'💎 Loot Storm',frenzy:'🔥 Enemy Frenzy',stop:'■ Admin Abuse Stopped'};
 function saveKnownPlayers(){ const tmp=PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(knownPlayers,null,2),'utf8'); fs.renameSync(tmp,PLAYERS_FILE); }
 function coinGiftKey(username){ return clean(username,18).toLowerCase(); }
@@ -162,6 +170,7 @@ const rooms = new Map();
 const leaderboardRate = new Map();
 const chatRate = new Map();
 const chatHttpRate = new Map();
+const eventContributionRate = new Map();
 const CHAT_MAX_HISTORY = 200;
 const CHAT_MESSAGE_MAX = 180;
 const ANNOUNCEMENT_MAX_HISTORY = 100;
@@ -218,23 +227,34 @@ app.use(express.json({limit:'32kb'}));
 app.get('/',(req,res)=>{const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent});});
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
 app.get('/api/event/state',(req,res)=>{
+  const schedule=eventScheduleState();
   const points=Math.max(0,Math.floor(Number(eventProgress.points)||0)),goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));
   const percent=Math.min(100,points/goal*100);
+  const octoberActive=schedule.live||(globalEvent.active&&String(globalEvent.type||'')==='october');
   res.set('Cache-Control','no-store');
-  res.json({ok:true,event:'october',progress:{points,goal,percent,updatedAt:Number(eventProgress.updatedAt)||0},active:Boolean(globalEvent.active),globalEvent});
+  res.json({ok:true,event:'october',schedule:{id:schedule.id,type:schedule.type,scheduledStartAt:schedule.startAt,serverNow:schedule.serverNow,live:schedule.live},progress:{points,goal,percent,updatedAt:Number(eventProgress.updatedAt)||0},active:Boolean(octoberActive),globalEvent:octoberActive?globalEvent:{active:false}});
 });
 app.post('/api/event/contribute',(req,res)=>{
   const username=clean(req.body?.username,18)||'Player';
-  const points=Math.max(1,Math.min(25,Math.floor(Number(req.body?.points)||1)));
   const reason=clean(req.body?.reason,40)||'event';
   if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username))return res.status(400).json({ok:false,error:'Invalid username'});
+  if(!Object.prototype.hasOwnProperty.call(EVENT_REASON_LIMITS,reason))return res.status(400).json({ok:false,error:'Invalid event contribution reason'});
+  const requested=Math.max(1,Math.min(25,Math.floor(Number(req.body?.points)||1)));
+  if(requested>EVENT_REASON_LIMITS[reason])return res.status(400).json({ok:false,error:'Contribution amount does not match this action'});
+  const rate=allowEventContribution(req,username,requested);
+  if(!rate.ok)return res.status(429).json({ok:false,error:'Event contribution rate limit reached',retryAfter:rate.retryAfter});
   const key=username.toLowerCase();
   const p=eventPlayers[key]||{username,points:0,bosses:0,updatedAt:0};
-  p.username=username;p.points=Math.min(1000000,Math.max(0,Math.floor(Number(p.points)||0))+points);if(reason==='boss-clear')p.bosses=Math.min(9999,Math.floor(Number(p.bosses)||0)+1);p.updatedAt=Date.now();eventPlayers[key]=p;
-  eventProgress.points=Math.min(Math.max(1,Math.floor(Number(eventProgress.goal)||5000)),Math.floor(Number(eventProgress.points)||0)+points);eventProgress.goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));eventProgress.updatedAt=Date.now();
+  p.username=username;p.points=Math.min(EVENT_PLAYER_MAX_POINTS,Math.max(0,Math.floor(Number(p.points)||0))+requested);
+  if(reason==='boss-clear')p.bosses=Math.min(9999,Math.floor(Number(p.bosses)||0)+1);
+  p.updatedAt=Date.now();eventPlayers[key]=p;
+  eventProgress.points=Math.min(Math.max(1,Math.floor(Number(eventProgress.goal)||5000)),Math.floor(Number(eventProgress.points)||0)+requested);
+  eventProgress.goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));eventProgress.updatedAt=Date.now();
   saveEventPlayers();saveEventProgress();
-  res.json({ok:true,player:p,progress:{points:eventProgress.points,goal:eventProgress.goal,percent:Math.min(100,eventProgress.points/eventProgress.goal*100),updatedAt:eventProgress.updatedAt}});
+  const schedule=eventScheduleState();
+  res.json({ok:true,player:p,progress:{points:eventProgress.points,goal:eventProgress.goal,percent:Math.min(100,eventProgress.points/eventProgress.goal*100),updatedAt:eventProgress.updatedAt},schedule:{scheduledStartAt:schedule.startAt,serverNow:schedule.serverNow,live:schedule.live}});
 });
+
 app.get('/api/event/leaderboard',(req,res)=>{
   const limit=Math.min(100,Math.max(1,Math.floor(Number(req.query?.limit)||10)));
   const entries=Object.values(eventPlayers).sort((a,b)=>Number(b.points||0)-Number(a.points||0)||Number(b.bosses||0)-Number(a.bosses||0)||String(a.username).localeCompare(String(b.username))).slice(0,limit);
