@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.90';
+const SERVER_VERSION = '3.27.96';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -498,7 +498,48 @@ app.post('/api/leaderboard',async(req,res)=>{
 
 app.get('/api/health',(req,res)=>{expireGlobalEventIfNeeded();const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,rooms:rooms.size,feedback:feedback.length,globalEvent});});
 app.get('/api/coop/status',(req,res)=>{expireGlobalEventIfNeeded();const onlinePlayers=connectedPlayerSnapshot();res.json({version:SERVER_VERSION,rooms:rooms.size,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,maxPlayers:MAX_ROOM_PLAYERS,globalEvent:globalEvent});});
-app.get('/api/feedback',(req,res)=>res.json({entries:feedback.slice().sort((a,b)=>Number(b.date)-Number(a.date))}));
+function feedbackLooksAbusive(entry){
+  const text=String((entry?.title||'')+' '+(entry?.body||'')).toLowerCase();
+  return /(?:\bf+u+c+k+\b|\bshit\b|\basshole\b|\bbitch\b|\bkill yourself\b|\bslut\b|\bwhore\b|\bporn\b|\bsex\b)/i.test(text);
+}
+function sanitizeFeedbackQueue(){
+  let changed=false;
+  for(const entry of feedback){
+    if(!entry||entry.status==='Hidden'||entry.status==='Rejected')continue;
+    if(feedbackLooksAbusive(entry)){entry.status='Hidden';entry.moderation='Automatic content filter';entry.moderatedAt=Date.now();changed=true;}
+  }
+  if(changed)saveFeedback();
+}
+app.get('/api/feedback',(req,res)=>{
+  sanitizeFeedbackQueue();
+  res.json({entries:feedback.filter(x=>x.status!=='Hidden'&&x.status!=='Rejected').slice().sort((a,b)=>Number(b.date)-Number(a.date))});
+});
+app.get('/api/owner/feedback',(req,res)=>{
+  if(!isOwnerRequest(req))return res.status(403).json({ok:false,error:'Owner access required'});
+  sanitizeFeedbackQueue();
+  const entries=feedback.slice().sort((a,b)=>Number(b.date)-Number(a.date));
+  res.json({ok:true,entries,counts:{
+    total:entries.length,
+    pending:entries.filter(x=>String(x.status||'Pending')==='Pending').length,
+    hidden:entries.filter(x=>String(x.status)==='Hidden').length,
+    resolved:entries.filter(x=>String(x.status)==='Resolved').length
+  }});
+});
+app.post('/api/owner/feedback',(req,res)=>{
+  if(!isOwnerRequest(req))return res.status(403).json({ok:false,error:'Owner access required'});
+  const id=clean(req.body?.id,80), action=String(req.body?.action||'').toLowerCase();
+  const entry=feedback.find(x=>String(x.id)===id);
+  if(!entry)return res.status(404).json({ok:false,error:'Submission not found'});
+  if(action==='hide'||action==='reject'){
+    entry.status='Hidden';entry.moderation='Owner moderation';entry.moderatedAt=Date.now();
+  }else if(action==='restore'){
+    entry.status='Pending';delete entry.moderation;delete entry.moderatedAt;
+  }else if(action==='resolve'){
+    entry.status='Resolved';entry.moderatedAt=Date.now();
+  }else return res.status(400).json({ok:false,error:'Unknown moderation action'});
+  saveFeedback();
+  res.json({ok:true,entry});
+});
 app.post('/api/feedback',(req,res)=>{
   const clientId=clean(req.body?.clientId,120), user=clean(req.body?.user,18)||'Player', type=req.body?.type==='idea'?'idea':'bug', title=clean(req.body?.title,80), body=clean(req.body?.body,1000), date=Number(req.body?.date)||Date.now();
   if(title.length<3||body.length<5)return res.status(400).json({ok:false,error:'Title/body too short'});
