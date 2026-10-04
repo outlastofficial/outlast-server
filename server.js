@@ -537,7 +537,6 @@ app.post('/api/owner/players/delete',(req,res)=>{
     Object.prototype.hasOwnProperty.call(eventPlayers,key);
   if(!existed) return res.status(404).json({ok:false,error:'Username not found'});
   deletePlayerIdentity(username);
-  if(leaderboardPool){try{await leaderboardPool.query('DELETE FROM outlast_leaderboard WHERE lower(name)=lower($1)',[username]);}catch(err){console.warn('Leaderboard identity delete failed:',err.message);}}
   res.json({ok:true,username,deleted:true});
 });
 app.post('/api/owner/players/unban',(req,res)=>{
