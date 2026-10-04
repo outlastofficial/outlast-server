@@ -406,9 +406,10 @@ function ownerPlayerList(){
     }
   }
   const names=new Map();
-  for(const p of knownPlayers) if(p?.username) names.set(String(p.username).toLowerCase(),p);
-  for(const entry of leaderboard) if(entry?.name) names.set(String(entry.name).toLowerCase(),{username:clean(entry.name,18),lastSeen:0});
+  for(const p of knownPlayers) if(p?.username) names.set(normalizePlayerKey(p.username),p);
+  for(const entry of leaderboard) if(entry?.name) names.set(normalizePlayerKey(entry.name),{username:clean(entry.name,18),lastSeen:0});
   for(const [key,p] of onlineByName) names.set(key,{username:p.username,lastSeen:Date.now()});
+  for(const [key,record] of Object.entries(bannedPlayers)) if(record?.username) names.set(key,{username:clean(record.username,18),lastSeen:0});
   return [...names.values()].map(p=>({
     username:clean(p.username,18),
     online:onlineByName.has(clean(p.username,18).toLowerCase()),
@@ -795,7 +796,7 @@ wss.on('close',()=>clearInterval(wsHeartbeat));
 wss.on('connection',socket=>{
   socket.__outlastAlive=true;
   socket.on('pong',()=>{socket.__outlastAlive=true;});
-  const player={id:Math.random().toString(36).slice(2)+Date.now().toString(36),socket,username:'Player',roomCode:'',x:1600,y:1200,skinColor:'#ff9d5c',characterVisual:{body:'#ff9d5c',style:'survivor'},level:1};
+  const player={id:Math.random().toString(36).slice(2)+Date.now().toString(36),socket,username:'Player',authorized:false,roomCode:'',x:1600,y:1200,skinColor:'#ff9d5c',characterVisual:{body:'#ff9d5c',style:'survivor'},level:1};
   socket.__outlastPlayer=player;
   send(socket,{type:'welcome',message:'Connected to the OUTLAST server!',id:player.id,version:SERVER_VERSION});
   send(socket,{type:'chat_history',messages:chatHistory.slice(-CHAT_MAX_HISTORY)});
@@ -804,6 +805,11 @@ wss.on('connection',socket=>{
     let msg; try{msg=JSON.parse(raw.toString());}catch(_){return;}
     if(!enforceSocketAccess(socket,player))return;
     const type=msg?.type;
+    if(type!=='player_join'&&type!=='player_ping'&&!player.authorized){
+      send(socket,{type:'access_required',message:'Join the OUTLAST server before using multiplayer features.'});
+      return;
+    }
+    if(player.authorized&&!enforceSocketAccess(socket,player))return;
     if(type==='chat_message'){
       const now=Date.now(), key=player.id;
       const recent=(chatRate.get(key)||[]).filter(t=>now-t<10000);
@@ -822,6 +828,7 @@ wss.on('connection',socket=>{
       if(usernameProblem){send(socket,{type:'access_revoked',message:usernameProblem});try{socket.close(4005,'Invalid username');}catch(_){}return;}
       if(isBannedPlayer(requestedUsername)){send(socket,{type:'access_revoked',message:'Access unavailable for this username.'});try{socket.close(4003,'Access unavailable');}catch(_){}return;}
       player.username=requestedUsername;
+      player.authorized=true;
       if(player.username!=='Player'){
         const key=player.username.toLowerCase(), existing=knownPlayers.find(p=>String(p.username).toLowerCase()===key);
         if(existing){existing.username=player.username;existing.lastSeen=Date.now();existing.createdAt=Number(existing.createdAt)||Date.now();}else knownPlayers.push({username:player.username,lastSeen:Date.now(),createdAt:Date.now()});
