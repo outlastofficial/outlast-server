@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.114';
+const SERVER_VERSION = '3.28.0';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -43,6 +43,7 @@ const leaderboardPool = process.env.DATABASE_URL ? new Pool({
   max: 5,
 }) : null;
 let leaderboardDbReady = false;
+let banDbReady = false;
 
 function loadFeedback() {
   try { const parsed = JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf8')); return Array.isArray(parsed) ? parsed : []; }
@@ -193,6 +194,79 @@ function saveBannedPlayers(){
   fs.writeFileSync(tmp, JSON.stringify(bannedPlayers,null,2),'utf8');
   fs.renameSync(tmp,BANNED_PLAYERS_FILE);
 }
+async function initBanDatabase(){
+  if(!leaderboardPool) return false;
+  await leaderboardPool.query(
+    `CREATE TABLE IF NOT EXISTS outlast_player_bans (
+      username_key TEXT PRIMARY KEY,
+      ban_id TEXT NOT NULL UNIQUE,
+      username TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT 'Owner moderation',
+      banned_by TEXT NOT NULL DEFAULT 'Owner',
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE
+    )`
+  );
+  // Import legacy JSON bans once, while Postgres remains the long-term authority.
+  for(const [key,record] of Object.entries(bannedPlayers||{})){
+    if(!record?.username)continue;
+    const banId=clean(record.banId,80)||('ban_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10));
+    const at=Number(record.at)||Date.now();
+    await leaderboardPool.query(
+      `INSERT INTO outlast_player_bans
+        (username_key,ban_id,username,reason,banned_by,created_at,updated_at,active)
+       VALUES($1,$2,$3,$4,$5,$6,$6,TRUE)
+       ON CONFLICT(username_key) DO UPDATE SET
+        ban_id=EXCLUDED.ban_id,username=EXCLUDED.username,reason=EXCLUDED.reason,
+        banned_by=EXCLUDED.banned_by,created_at=EXCLUDED.created_at,updated_at=EXCLUDED.updated_at,active=TRUE
+       WHERE outlast_player_bans.updated_at <= EXCLUDED.updated_at`,
+      [key,banId,clean(record.username,18),clean(record.reason,160)||'Owner moderation',clean(record.by,18)||'Owner',at]
+    );
+  }
+  const rows=await leaderboardPool.query(
+    'SELECT username_key,ban_id,username,reason,banned_by,created_at FROM outlast_player_bans WHERE active=TRUE'
+  );
+  const fromDb={};
+  for(const row of rows.rows){
+    fromDb[row.username_key]={
+      username:clean(row.username,18),
+      reason:clean(row.reason,160)||'Owner moderation',
+      at:Number(row.created_at)||Date.now(),
+      by:clean(row.banned_by,18)||'Owner',
+      banId:clean(row.ban_id,80)||'',
+      version:3,
+      source:'postgres'
+    };
+  }
+  bannedPlayers=fromDb;
+  saveBannedPlayers();
+  banDbReady=true;
+  return true;
+}
+async function persistBanRecord(record,active=true){
+  if(!leaderboardPool||!banDbReady||!record?.username)return;
+  const key=normalizePlayerKey(record.username);
+  const now=Date.now();
+  if(active){
+    const banId=clean(record.banId,80)||('ban_'+now.toString(36)+'_'+Math.random().toString(36).slice(2,10));
+    record.banId=banId;
+    await leaderboardPool.query(
+      `INSERT INTO outlast_player_bans
+        (username_key,ban_id,username,reason,banned_by,created_at,updated_at,active)
+       VALUES($1,$2,$3,$4,$5,$6,$7,TRUE)
+       ON CONFLICT(username_key) DO UPDATE SET
+        ban_id=EXCLUDED.ban_id,username=EXCLUDED.username,reason=EXCLUDED.reason,
+        banned_by=EXCLUDED.banned_by,created_at=EXCLUDED.created_at,updated_at=EXCLUDED.updated_at,active=TRUE`,
+      [key,banId,clean(record.username,18),clean(record.reason,160)||'Owner moderation',clean(record.by,18)||'Owner',Number(record.at)||now,now]
+    );
+  }else{
+    await leaderboardPool.query(
+      'UPDATE outlast_player_bans SET active=FALSE,updated_at=$2 WHERE username_key=$1',
+      [key,now]
+    );
+  }
+}
 function bannedPlayerRecord(username){
   const key=normalizePlayerKey(username);
   if(!key)return null;
@@ -209,7 +283,7 @@ function banPlayer(username,reason,by){
   if(!validPlayerUsername(cleanName))return {ok:false,error:'Invalid player username',status:400};
   if(isOwnerAccount(cleanName))return {ok:false,error:'Owner accounts cannot be banned',status:400};
   const key=normalizePlayerKey(cleanName);
-  const record={username:cleanName,reason:clean(reason,160)||'Owner moderation',at:Date.now(),by:clean(by,18)||'Owner',version:2};
+  const record={username:cleanName,reason:clean(reason,160)||'Owner moderation',at:Date.now(),by:clean(by,18)||'Owner',version:3,banId:'ban_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10)};
   const already=bannedPlayers[key];
   bannedPlayers[key]=record;
   saveBannedPlayers();
@@ -609,19 +683,33 @@ app.get('/api/owner/players',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
   res.json({ok:true,players:ownerPlayerList()});
 });
-app.post('/api/owner/players/ban',(req,res)=>{
+app.post('/api/owner/players/ban',async(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
   const result=banPlayer(req.body?.username,req.body?.reason,req.body?.ownerUsername);
   if(!result.ok)return res.status(result.status||400).json({ok:false,error:result.error});
+  try{await persistBanRecord(result.record,true);}
+  catch(err){
+    unbanPlayer(result.username);
+    console.error('Ban persistence failed:',err.message);
+    return res.status(503).json({ok:false,error:'Ban could not be saved. Please retry.'});
+  }
   res.set('Cache-Control','no-store');
-  res.json(result);
+  res.json({...result,storage:banDbReady?'postgres':'server-cache'});
 });
-app.post('/api/owner/players/unban',(req,res)=>{
+app.post('/api/owner/players/unban',async(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
-  const result=unbanPlayer(req.body?.username);
+  const username=clean(req.body?.username,18),previous=bannedPlayerRecord(username);
+  const result=unbanPlayer(username);
   if(!result.ok)return res.status(result.status||400).json({ok:false,error:result.error});
+  try{await persistBanRecord(previous||{username},false);}
+  catch(err){
+    if(previous)bannedPlayers[normalizePlayerKey(previous.username)]=previous;
+    saveBannedPlayers();
+    console.error('Unban persistence failed:',err.message);
+    return res.status(503).json({ok:false,error:'Ban status could not be saved. Please retry.'});
+  }
   res.set('Cache-Control','no-store');
-  res.json(result);
+  res.json({...result,storage:banDbReady?'postgres':'server-cache'});
 });
 app.post('/api/owner/players/delete',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
@@ -636,27 +724,6 @@ app.post('/api/owner/players/delete',(req,res)=>{
   deletePlayerIdentity(username);
   res.json({ok:true,username,deleted:true});
 });
-app.post('/api/owner/players/unban',(req,res)=>{
-  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
-  const username=clean(req.body?.username,18),key=username.toLowerCase();
-  if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)) return res.status(400).json({ok:false,error:'Invalid player username'});
-  delete bannedPlayers[key]; saveBannedPlayers(); res.json({ok:true,username,banned:false});
-});
-
-app.get('/api/leaderboard',async(req,res)=>{
- const limit=Math.min(100,Math.max(1,Math.floor(Number(req.query?.limit)||100)));
- const requestedMode=clean(req.query?.mode,30);
- const requestedDifficulty=clean(req.query?.difficulty,30);
- try{
-   const dbEntries=await readLeaderboardDb(requestedMode,requestedDifficulty,limit);
-   if(dbEntries){res.set('Cache-Control','no-store');return res.json({ok:true,version:SERVER_VERSION,revision:4,totalPlayers:dbEntries.length,entries:dbEntries});}
- }catch(err){console.warn('Leaderboard database read failed:',err.message);}
- leaderboard=normalizeLeaderboard(leaderboard);
- const filtered=leaderboard.filter(x=>(!requestedMode||String(x.mode||'Classic').toLowerCase()===requestedMode.toLowerCase())&&(!requestedDifficulty||String(x.difficulty||'Normal').toLowerCase()===requestedDifficulty.toLowerCase()));
- res.set('Cache-Control','no-store');
- res.json({ok:true,version:SERVER_VERSION,revision:4,totalPlayers:filtered.length,entries:filtered.slice(0,limit)});
-});
-
 app.post('/api/leaderboard',async(req,res)=>{
  const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
  const now=Date.now(),recent=leaderboardRate.get(ip)||[],windowed=recent.filter(t=>now-t<10*60*1000);
@@ -863,5 +930,9 @@ function broadcastPlayerCount(){
   for(const socket of wss.clients)send(socket,payload);
 }
 initDiscord({app,dataDir:DATA_DIR,inviteUrl:'https://discord.gg/bCMdZfggQ'});
-initLeaderboardDatabase().then(()=>console.log(`Leaderboard storage: ${leaderboardDbReady?'Postgres':'JSON fallback'}`)).catch(err=>console.error('Leaderboard database initialization failed:',err.message));
-server.listen(PORT,'0.0.0.0',()=>console.log(`OUTLAST server running on port ${PORT}`));
+Promise.all([
+  initLeaderboardDatabase().then(()=>console.log(`Leaderboard storage: ${leaderboardDbReady?'Postgres':'JSON fallback'}`)).catch(err=>console.error('Leaderboard database initialization failed:',err.message)),
+  initBanDatabase().then(()=>console.log(`Ban storage: ${banDbReady?'Postgres':'JSON fallback'}`)).catch(err=>console.error('Ban database initialization failed:',err.message))
+]).finally(()=>{
+  server.listen(PORT,'0.0.0.0',()=>console.log(`OUTLAST server running on port ${PORT}`));
+});
