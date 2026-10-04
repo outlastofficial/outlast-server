@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.109';
+const SERVER_VERSION = '3.27.111';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -219,6 +219,59 @@ const EVENT_PLAYER_MAX_POINTS=5000;
 const EVENT_REASON_LIMITS={clue:5,mission:2,'boss-summon':10,'boss-clear':15,'event-run':3,encounter:2};
 const ABUSE_LABELS={boss:'👹 Boss Spawn',blackout:'🌑 Blackout',speed:'💨 Enemy Speed Surge',chaos:'⚡ Chaos',powerup:'✨ Power-Up Rain',waves:'🧟 Rapid Waves',meteor:'☄️ Meteor Shower',swarm:'🧟 Mega Swarm',lootstorm:'💎 Loot Storm',frenzy:'🔥 Enemy Frenzy',stop:'■ Admin Abuse Stopped'};
 function saveKnownPlayers(){ const tmp=PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(knownPlayers,null,2),'utf8'); fs.renameSync(tmp,PLAYERS_FILE); }
+
+function usernameFilterReason(username){
+  const value=String(username||'').trim().toLowerCase().replace(/[._-]+/g,' ');
+  if(!value) return 'Username is required';
+  // Keep the list server-side so the client cannot bypass the safety check.
+  const blockedPatterns=[
+    /(?:^|\\s)(?:nigg|n1gg|fagg|f4gg|kys)(?:er|a|ot)?(?:$|\\s)/i,
+    /(?:^|\\s)(?:fuck|fuk|fck|shit|bitch|asshole|cunt|whore|slut)(?:$|\\s)/i,
+    /(?:^|\\s)(?:porn|porno|xxx|sex|hentai)(?:$|\\s)/i,
+    /(?:^|\\s)(?:rape|rapist|molest|pedophile|pedo)(?:$|\\s)/i
+  ];
+  if(blockedPatterns.some(re=>re.test(value))) return 'That username is not available';
+  if(/(?:^|\\s)(?:admin|administrator|moderator|mod|owner|official|system|support)(?:$|\\s)/i.test(value)) return 'That username is reserved';
+  return '';
+}
+function chatFilterMessage(message){
+  let value=String(message||'').slice(0,CHAT_MESSAGE_MAX);
+  const blocked=[
+    /fuck/ig,/f+u+c+k/ig,/shit/ig,/bitch/ig,/asshole/ig,/cunt/ig,/whore/ig,/slut/ig,
+    /porn/ig,/hentai/ig,/rape/ig,/rapist/ig,/molest/ig,/pedophile/ig,/pedo/ig,
+    /nigg(?:er|a)?/ig,/fagg(?:ot)?/ig
+  ];
+  let changed=false;
+  for(const re of blocked){
+    value=value.replace(re,match=>{changed=true;return '*'.repeat(Math.min(match.length,8));});
+  }
+  return {message:value,changed};
+}
+function deletePlayerIdentity(username){
+  const key=String(username||'').trim().toLowerCase();
+  if(!key) return false;
+  knownPlayers=knownPlayers.filter(p=>String(p?.username||'').trim().toLowerCase()!==key);
+  betaPlayers=betaPlayers.filter(p=>String(p||'').trim().toLowerCase()!==key);
+  delete bannedPlayers[key];
+  delete coinGifts[key];
+  delete eventPlayers[key];
+  leaderboard=leaderboard.filter(x=>String(x?.name||'').trim().toLowerCase()!==key);
+  saveKnownPlayers();
+  saveBannedPlayers();
+  saveJson(BETA_PLAYERS_FILE,betaPlayers);
+  saveCoinGifts();
+  saveEventPlayers();
+  saveJson(LEADERBOARD_FILE,leaderboard);
+  for(const socket of wss.clients){
+    const player=socket.__outlastPlayer;
+    if(player&&String(player.username||'').trim().toLowerCase()===key){
+      send(socket,{type:'access_revoked',message:'Access unavailable for this username.'});
+      try{socket.close(4004,'Access unavailable');}catch(_){}
+    }
+  }
+  return true;
+}
+
 function coinGiftKey(username){ return clean(username,18).toLowerCase(); }
 const rooms = new Map();
 const leaderboardRate = new Map();
@@ -330,6 +383,7 @@ app.get('/api/event/leaderboard',(req,res)=>{
 app.post('/api/players/register',(req,res)=>{
   const username=clean(req.body?.username,18);
   if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)) return res.status(400).json({ok:false,error:'Invalid username'});
+  const usernameProblem=usernameFilterReason(username); if(usernameProblem) return res.status(400).json({ok:false,error:usernameProblem});
   if(isBannedPlayer(username)) return res.status(403).json({ok:false,error:'Access unavailable for this username.'});
   const key=username.toLowerCase();
   const existing=knownPlayers.find(p=>String(p.username||'').toLowerCase()===key);
@@ -363,8 +417,9 @@ app.post('/api/chat',(req,res)=>{
   const username=clean(req.body?.username,18)||'Player';
   const message=clean(req.body?.message,CHAT_MESSAGE_MAX);
   if(!message)return res.status(400).json({ok:false,error:'Message is required'});
+  const filtered=chatFilterMessage(message);
   recent.push(now);chatHttpRate.set(ip,recent);
-  const entry=addChatMessage(username,message);
+  const entry=addChatMessage(username,filtered.message);
   if(!entry)return res.status(400).json({ok:false,error:'Message is required'});
   broadcastGlobal({type:'chat_message',...entry});
   res.set('Cache-Control','no-store');
@@ -467,6 +522,19 @@ app.post('/api/owner/players/ban',(req,res)=>{
   saveBannedPlayers();
   for(const socket of wss.clients){const player=socket.__outlastPlayer;if(player&&String(player.username||'').toLowerCase()===key){send(socket,{type:'access_revoked',message:'Access unavailable for this username.'});try{socket.close(4003,'Access unavailable');}catch(_){} }}
   res.json({ok:true,username,banned:true});
+});
+app.post('/api/owner/players/delete',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  const username=clean(req.body?.username,18);
+  if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)) return res.status(400).json({ok:false,error:'Invalid player username'});
+  const key=username.toLowerCase();
+  const existed=knownPlayers.some(p=>String(p?.username||'').toLowerCase()===key) ||
+    leaderboard.some(x=>String(x?.name||'').toLowerCase()===key) ||
+    Object.prototype.hasOwnProperty.call(bannedPlayers,key) ||
+    Object.prototype.hasOwnProperty.call(eventPlayers,key);
+  if(!existed) return res.status(404).json({ok:false,error:'Username not found'});
+  deletePlayerIdentity(username);
+  res.json({ok:true,username,deleted:true});
 });
 app.post('/api/owner/players/unban',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
@@ -640,13 +708,16 @@ wss.on('connection',socket=>{
       if(recent.length>=6){ send(socket,{type:'chat_error',error:'You are sending messages too quickly.'}); return; }
       const message=clean(msg.message,CHAT_MESSAGE_MAX);
       if(!message)return;
+      const filtered=chatFilterMessage(message);
       recent.push(now);chatRate.set(key,recent);
-      const entry=addChatMessage(player.username,message);
+      const entry=addChatMessage(player.username,filtered.message);
       if(entry) broadcastGlobal({type:'chat_message',...entry});
       return;
     }
     if(type==='player_join'||type==='player_ping'){
       const requestedUsername=clean(msg.username,18)||player.username;
+      const usernameProblem=usernameFilterReason(requestedUsername);
+      if(usernameProblem){send(socket,{type:'access_revoked',message:usernameProblem});try{socket.close(4005,'Invalid username');}catch(_){}return;}
       if(isBannedPlayer(requestedUsername)){send(socket,{type:'access_revoked',message:'Access unavailable for this username.'});try{socket.close(4003,'Access unavailable');}catch(_){}return;}
       player.username=requestedUsername;
       if(player.username!=='Player'){
@@ -657,7 +728,7 @@ wss.on('connection',socket=>{
       broadcastPlayerCount();
       return;
     }
-    if(type==='create_room'){detachFromRoom(player);const code=roomCode();const room={code,started:false,players:new Map()};rooms.set(code,room);const requestedUsername=clean(msg.username,18)||player.username;if(isBannedPlayer(requestedUsername))return send(socket,{type:'room_error',error:'Access unavailable for this username.'});player.roomCode=code;player.username=requestedUsername;room.players.set(player.id,player);send(socket,{type:'room_created',...roomSnapshot(room),selfId:player.id});return;}
+    if(type==='create_room'){detachFromRoom(player);const code=roomCode();const room={code,started:false,players:new Map()};rooms.set(code,room);const requestedUsername=clean(msg.username,18)||player.username;const usernameProblem=usernameFilterReason(requestedUsername);if(usernameProblem)return send(socket,{type:'room_error',error:usernameProblem});if(isBannedPlayer(requestedUsername))return send(socket,{type:'room_error',error:'Access unavailable for this username.'});player.roomCode=code;player.username=requestedUsername;room.players.set(player.id,player);send(socket,{type:'room_created',...roomSnapshot(room),selfId:player.id});return;}
     if(type==='join_room'){detachFromRoom(player);const code=clean(msg.code,4).toUpperCase(),room=rooms.get(code);if(!room)return send(socket,{type:'room_error',error:'Room not found.'});if(room.players.size>=MAX_ROOM_PLAYERS)return send(socket,{type:'room_error',error:'That room is full.'});const requestedUsername=clean(msg.username,18)||player.username;if(isBannedPlayer(requestedUsername))return send(socket,{type:'room_error',error:'Access unavailable for this username.'});player.roomCode=code;player.username=requestedUsername;room.players.set(player.id,player);broadcastRoom(room,{type:'room_state',...roomSnapshot(room)});send(socket,{type:'room_joined',...roomSnapshot(room),selfId:player.id});return;}
     if(type==='leave_room'){detachFromRoom(player);return;}
     if(type==='start_run'){const room=rooms.get(player.roomCode);if(!room)return send(socket,{type:'room_error',error:'Join a room first.'});room.started=true;broadcastRoom(room,{type:'room_game_start'});broadcastRoom(room,{type:'room_state',...roomSnapshot(room)});return;}
