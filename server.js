@@ -237,13 +237,13 @@ function usernameFilterReason(username){
 function normalizeChatForFilter(message){
   return String(message||'')
     .normalize('NFKC')
-    .replace(/[\\u200B-\\u200D\\uFEFF]/g,'')
+    .replace(/[\u200B-\u200D\uFEFF]/g,'')
     .toLowerCase()
     .replace(/[0@]/g,'o')
     .replace(/[1!|]/g,'i')
     .replace(/3/g,'e')
     .replace(/4/g,'a')
-    .replace(/5\\$/g,'s')
+    .replace(/5/g,'s')
     .replace(/7/g,'t')
     .replace(/8/g,'b')
     .replace(/[^a-z0-9]+/g,'');
@@ -260,7 +260,7 @@ function chatFilterMessage(message){
   ];
   let changed=false;
   if(blocked.some(re=>re.test(scan))){
-    value=value.replace(/\\S+/g,token=>{
+    value=value.replace(/\S+/g,token=>{
       const tokenScan=normalizeChatForFilter(token);
       if(blocked.some(re=>re.test(tokenScan))){changed=true;return '*'.repeat(Math.min(token.length,12));}
       return token;
