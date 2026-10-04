@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.105';
+const SERVER_VERSION = '3.27.109';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -27,6 +27,7 @@ const GLOBAL_EVENT_FILE = path.join(DATA_DIR, 'global-event.json');
 const EVENT_PROGRESS_FILE = path.join(DATA_DIR, 'event-progress.json');
 const EVENT_PLAYERS_FILE = path.join(DATA_DIR, 'event-players.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
+const BANNED_PLAYERS_FILE = path.join(DATA_DIR, 'banned-players.json');
 const OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke'];
 const CHAT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke'];
 const CHAT_TESTER_USERNAMES = ['Max', 'SS'];
@@ -92,6 +93,8 @@ leaderboard=normalizeLeaderboard(leaderboard);
 let betaPlayers = loadJson(BETA_PLAYERS_FILE, []);
 let coinGifts = loadJson(COIN_GIFTS_FILE, {});
 let knownPlayers = loadJson(PLAYERS_FILE, []);
+let bannedPlayers = loadJson(BANNED_PLAYERS_FILE, {});
+if(!bannedPlayers || typeof bannedPlayers!=='object' || Array.isArray(bannedPlayers)) bannedPlayers={};
 let globalEvent = loadJson(GLOBAL_EVENT_FILE, {active:false});
 let adminAbuse={active:false,action:'',label:'',startedAt:0,endsAt:0,startedBy:''};
 let eventProgress = loadJson(EVENT_PROGRESS_FILE, {points:0,goal:5000,startedAt:Date.now(),updatedAt:0});
@@ -168,6 +171,9 @@ async function readLeaderboardDb(mode,difficulty,limit){
 }
 function normalizeLeaderboard(list){const byName=new Map();for(const raw of Array.isArray(list)?list:[]){const name=clean(raw?.name,18)||'Player';if(!/^[A-Za-z0-9 _-]{2,18}$/.test(name))continue;const score=Math.max(0,Math.floor(Number(raw?.score)||0)),level=Math.max(1,Math.floor(Number(raw?.level)||1)),kills=Math.max(0,Math.floor(Number(raw?.kills)||0));const candidate={id:String(raw?.id||name.toLowerCase().replace(/[^a-z0-9_-]+/g,'-')).slice(0,40),name,score,level,kills,mode:clean(raw?.mode,30)||'Classic',difficulty:clean(raw?.difficulty,30)||'Normal',duration:Math.max(0,Math.floor(Number(raw?.duration)||0)),seed:clean(raw?.seed,48),modifier:clean(raw?.modifier,40)||'None',challenge:clean(raw?.challenge,40)||'None',weapon:clean(raw?.weapon,40),character:clean(raw?.character,40),extracted:Boolean(raw?.extracted),date:clean(raw?.date,40)||new Date().toLocaleDateString(),updatedAt:Number(raw?.updatedAt)||0,badge:clean(raw?.badge,20)};const key=name.toLowerCase()+'|'+candidate.mode.toLowerCase()+'|'+candidate.difficulty.toLowerCase(),existing=byName.get(key);if(!existing||candidate.score>existing.score||candidate.updatedAt>existing.updatedAt)byName.set(key,candidate);}return [...byName.values()].sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(b.updatedAt||0)-Number(a.updatedAt||0)).slice(0,1000);}
 
+function saveBannedPlayers(){ const tmp=BANNED_PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(bannedPlayers,null,2),'utf8'); fs.renameSync(tmp,BANNED_PLAYERS_FILE); }
+function bannedPlayerRecord(username){ const key=String(username||'').trim().toLowerCase(); return key ? bannedPlayers[key] || null : null; }
+function isBannedPlayer(username){ return !!bannedPlayerRecord(username); }
 function saveCoinGifts(){ const tmp=COIN_GIFTS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(coinGifts,null,2),'utf8'); fs.renameSync(tmp,COIN_GIFTS_FILE); }
 function saveGlobalEvent(){ const tmp=GLOBAL_EVENT_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(globalEvent,null,2),'utf8'); fs.renameSync(tmp,GLOBAL_EVENT_FILE); }
 function saveEventProgress(){ const tmp=EVENT_PROGRESS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventProgress,null,2),'utf8'); fs.renameSync(tmp,EVENT_PROGRESS_FILE); }
@@ -265,7 +271,10 @@ function ownerPlayerList(){
     username:clean(p.username,18),
     online:onlineByName.has(clean(p.username,18).toLowerCase()),
     createdAt:Number(p.createdAt)||0,
-    lastSeen:Number(p.lastSeen)||0
+    lastSeen:Number(p.lastSeen)||0,
+    banned:isBannedPlayer(p.username),
+    banReason:bannedPlayerRecord(p.username)?.reason||'',
+    bannedAt:Number(bannedPlayerRecord(p.username)?.at||0)
   })).sort((a,b)=>Number(b.online)-Number(a.online)||a.username.localeCompare(b.username));
 }
 
@@ -321,6 +330,7 @@ app.get('/api/event/leaderboard',(req,res)=>{
 app.post('/api/players/register',(req,res)=>{
   const username=clean(req.body?.username,18);
   if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)) return res.status(400).json({ok:false,error:'Invalid username'});
+  if(isBannedPlayer(username)) return res.status(403).json({ok:false,error:'Access unavailable for this username.'});
   const key=username.toLowerCase();
   const existing=knownPlayers.find(p=>String(p.username||'').toLowerCase()===key);
   if(existing){
@@ -447,6 +457,22 @@ app.post('/api/owner/verify',(req,res)=>{
 app.get('/api/owner/players',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
   res.json({ok:true,players:ownerPlayerList()});
+});
+app.post('/api/owner/players/ban',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  const username=clean(req.body?.username,18),reason=clean(req.body?.reason,160)||'Owner moderation';
+  if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)) return res.status(400).json({ok:false,error:'Invalid player username'});
+  const key=username.toLowerCase();
+  bannedPlayers[key]={username,reason,at:Date.now(),by:clean(req.body?.ownerUsername,18)||'Owner'};
+  saveBannedPlayers();
+  for(const socket of wss.clients){const player=socket.__outlastPlayer;if(player&&String(player.username||'').toLowerCase()===key){send(socket,{type:'access_revoked',message:'Access unavailable for this username.'});try{socket.close(4003,'Access unavailable');}catch(_){} }}
+  res.json({ok:true,username,banned:true});
+});
+app.post('/api/owner/players/unban',(req,res)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  const username=clean(req.body?.username,18),key=username.toLowerCase();
+  if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)) return res.status(400).json({ok:false,error:'Invalid player username'});
+  delete bannedPlayers[key]; saveBannedPlayers(); res.json({ok:true,username,banned:false});
 });
 
 app.get('/api/leaderboard',async(req,res)=>{
@@ -620,7 +646,9 @@ wss.on('connection',socket=>{
       return;
     }
     if(type==='player_join'||type==='player_ping'){
-      player.username=clean(msg.username,18)||player.username;
+      const requestedUsername=clean(msg.username,18)||player.username;
+      if(isBannedPlayer(requestedUsername)){send(socket,{type:'access_revoked',message:'Access unavailable for this username.'});try{socket.close(4003,'Access unavailable');}catch(_){}return;}
+      player.username=requestedUsername;
       if(player.username!=='Player'){
         const key=player.username.toLowerCase(), existing=knownPlayers.find(p=>String(p.username).toLowerCase()===key);
         if(existing){existing.username=player.username;existing.lastSeen=Date.now();existing.createdAt=Number(existing.createdAt)||Date.now();}else knownPlayers.push({username:player.username,lastSeen:Date.now(),createdAt:Date.now()});
@@ -629,11 +657,11 @@ wss.on('connection',socket=>{
       broadcastPlayerCount();
       return;
     }
-    if(type==='create_room'){detachFromRoom(player);const code=roomCode();const room={code,started:false,players:new Map()};rooms.set(code,room);player.roomCode=code;player.username=clean(msg.username,18)||player.username;room.players.set(player.id,player);send(socket,{type:'room_created',...roomSnapshot(room),selfId:player.id});return;}
-    if(type==='join_room'){detachFromRoom(player);const code=clean(msg.code,4).toUpperCase(),room=rooms.get(code);if(!room)return send(socket,{type:'room_error',error:'Room not found.'});if(room.players.size>=MAX_ROOM_PLAYERS)return send(socket,{type:'room_error',error:'That room is full.'});player.roomCode=code;player.username=clean(msg.username,18)||player.username;room.players.set(player.id,player);broadcastRoom(room,{type:'room_state',...roomSnapshot(room)});send(socket,{type:'room_joined',...roomSnapshot(room),selfId:player.id});return;}
+    if(type==='create_room'){detachFromRoom(player);const code=roomCode();const room={code,started:false,players:new Map()};rooms.set(code,room);const requestedUsername=clean(msg.username,18)||player.username;if(isBannedPlayer(requestedUsername))return send(socket,{type:'room_error',error:'Access unavailable for this username.'});player.roomCode=code;player.username=requestedUsername;room.players.set(player.id,player);send(socket,{type:'room_created',...roomSnapshot(room),selfId:player.id});return;}
+    if(type==='join_room'){detachFromRoom(player);const code=clean(msg.code,4).toUpperCase(),room=rooms.get(code);if(!room)return send(socket,{type:'room_error',error:'Room not found.'});if(room.players.size>=MAX_ROOM_PLAYERS)return send(socket,{type:'room_error',error:'That room is full.'});const requestedUsername=clean(msg.username,18)||player.username;if(isBannedPlayer(requestedUsername))return send(socket,{type:'room_error',error:'Access unavailable for this username.'});player.roomCode=code;player.username=requestedUsername;room.players.set(player.id,player);broadcastRoom(room,{type:'room_state',...roomSnapshot(room)});send(socket,{type:'room_joined',...roomSnapshot(room),selfId:player.id});return;}
     if(type==='leave_room'){detachFromRoom(player);return;}
     if(type==='start_run'){const room=rooms.get(player.roomCode);if(!room)return send(socket,{type:'room_error',error:'Join a room first.'});room.started=true;broadcastRoom(room,{type:'room_game_start'});broadcastRoom(room,{type:'room_state',...roomSnapshot(room)});return;}
-    if(type==='player_state'){const room=rooms.get(player.roomCode);if(!room)return;player.username=clean(msg.username,18)||player.username;player.x=Number.isFinite(Number(msg.x))?Math.max(0,Math.min(3200,Number(msg.x))):player.x;player.y=Number.isFinite(Number(msg.y))?Math.max(0,Math.min(2400,Number(msg.y))):player.y;player.skinColor=clean(msg.skinColor,24)||player.skinColor;player.characterVisual=msg.characterVisual&&typeof msg.characterVisual==='object'?msg.characterVisual:player.characterVisual;player.level=Math.max(1,Math.min(999,Number(msg.level)||1));broadcastRoom(room,{type:'player_state',id:player.id,username:player.username,x:player.x,y:player.y,skinColor:player.skinColor,characterVisual:player.characterVisual,level:player.level},player.id);return;}
+    if(type==='player_state'){const room=rooms.get(player.roomCode);if(!room)return;const requestedUsername=clean(msg.username,18)||player.username;if(isBannedPlayer(requestedUsername)){send(socket,{type:'access_revoked',message:'Access unavailable for this username.'});try{socket.close(4003,'Access unavailable');}catch(_){}return;}player.username=requestedUsername;player.x=Number.isFinite(Number(msg.x))?Math.max(0,Math.min(3200,Number(msg.x))):player.x;player.y=Number.isFinite(Number(msg.y))?Math.max(0,Math.min(2400,Number(msg.y))):player.y;player.skinColor=clean(msg.skinColor,24)||player.skinColor;player.characterVisual=msg.characterVisual&&typeof msg.characterVisual==='object'?msg.characterVisual:player.characterVisual;player.level=Math.max(1,Math.min(999,Number(msg.level)||1));broadcastRoom(room,{type:'player_state',id:player.id,username:player.username,x:player.x,y:player.y,skinColor:player.skinColor,characterVisual:player.characterVisual,level:player.level},player.id);return;}
   });
   socket.on('close',()=>{chatRate.delete(player.id);detachFromRoom(player);if(player.username&&player.username!=='Player'){const existing=knownPlayers.find(p=>String(p.username).toLowerCase()===player.username.toLowerCase());if(existing){existing.lastSeen=Date.now();saveKnownPlayers();}}broadcastPlayerCount();});
 });
