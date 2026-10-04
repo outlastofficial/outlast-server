@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.27.111';
+const SERVER_VERSION = '3.27.112';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -234,16 +234,40 @@ function usernameFilterReason(username){
   if(/(?:^|\\s)(?:admin|administrator|moderator|mod|owner|official|system|support)(?:$|\\s)/i.test(value)) return 'That username is reserved';
   return '';
 }
+function normalizeChatForFilter(message){
+  return String(message||'')
+    .normalize('NFKC')
+    .replace(/[\\u200B-\\u200D\\uFEFF]/g,'')
+    .toLowerCase()
+    .replace(/[0@]/g,'o')
+    .replace(/[1!|]/g,'i')
+    .replace(/3/g,'e')
+    .replace(/4/g,'a')
+    .replace(/5\\$/g,'s')
+    .replace(/7/g,'t')
+    .replace(/8/g,'b')
+    .replace(/[^a-z0-9]+/g,'');
+}
 function chatFilterMessage(message){
   let value=String(message||'').slice(0,CHAT_MESSAGE_MAX);
+  const scan=normalizeChatForFilter(value);
   const blocked=[
-    /fuck/ig,/f+u+c+k/ig,/shit/ig,/bitch/ig,/asshole/ig,/cunt/ig,/whore/ig,/slut/ig,
-    /porn/ig,/hentai/ig,/rape/ig,/rapist/ig,/molest/ig,/pedophile/ig,/pedo/ig,
-    /nigg(?:er|a)?/ig,/fagg(?:ot)?/ig
+    /fuck|fuk|fck|shit|bitch|asshole|cunt|whore|slut/,
+    /porn|porno|xxx|hentai|sex/,
+    /rape|rapist|molest|pedophile|pedo/,
+    /nigg(?:er|a)?|fagg(?:ot)?/,
+    /kys/
   ];
   let changed=false;
-  for(const re of blocked){
-    value=value.replace(re,match=>{changed=true;return '*'.repeat(Math.min(match.length,8));});
+  if(blocked.some(re=>re.test(scan))){
+    value=value.replace(/\\S+/g,token=>{
+      const tokenScan=normalizeChatForFilter(token);
+      if(blocked.some(re=>re.test(tokenScan))){changed=true;return '*'.repeat(Math.min(token.length,12));}
+      return token;
+    });
+    if(blocked.some(re=>re.test(normalizeChatForFilter(value)))){
+      changed=true;value='[message filtered]';
+    }
   }
   return {message:value,changed};
 }
