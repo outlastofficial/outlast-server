@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.28.1';
+const SERVER_VERSION = '3.28.2';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -467,8 +467,9 @@ function broadcastRoom(room,payload,exceptId=null){ for(const player of room.pla
 
 function isOwnerRequest(req){
   const owner=clean(req.body?.ownerUsername || req.query?.ownerUsername,18);
-  const password=String(req.body?.password ?? req.query?.password ?? '');
-  return OWNER_USERNAMES.some(name=>owner.toLowerCase()===name.toLowerCase()) && password===OWNER_PASSWORD;
+  /* v3.28.2: owner permission is tied to the recognized owner account name.
+     The separate owner-password gate is intentionally removed; normal player login is unaffected. */
+  return OWNER_USERNAMES.some(name=>owner.toLowerCase()===name.toLowerCase());
 }
 function ownerPlayerList(){
   const onlineByName=new Map();
