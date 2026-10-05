@@ -711,18 +711,77 @@ app.post('/api/owner/players/unban',async(req,res)=>{
   res.set('Cache-Control','no-store');
   res.json({...result,storage:banDbReady?'postgres':'server-cache'});
 });
-app.post('/api/owner/players/delete',(req,res)=>{
+app.post('/api/owner/players/delete',async(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+
+  const owner=clean(req.body?.ownerUsername,18);
   const username=clean(req.body?.username,18);
   if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)) return res.status(400).json({ok:false,error:'Invalid player username'});
-  const key=username.toLowerCase();
-  const existed=knownPlayers.some(p=>String(p?.username||'').toLowerCase()===key) ||
-    leaderboard.some(x=>String(x?.name||'').toLowerCase()===key) ||
-    Object.prototype.hasOwnProperty.call(bannedPlayers,key) ||
-    Object.prototype.hasOwnProperty.call(eventPlayers,key);
-  if(!existed) return res.status(404).json({ok:false,error:'Username not found'});
+
+  const key=normalizePlayerKey(username);
+  const ownerKey=normalizePlayerKey(owner);
+
+  /* Owner identities are never deletable, and an owner cannot delete itself. */
+  if(isOwnerAccount(username) || (ownerKey && key===ownerKey)){
+    return res.status(400).json({ok:false,error:'Protected owner account'});
+  }
+
+  const connected=wss.clients.size;
+  const hasKnown=knownPlayers.some(p=>normalizePlayerKey(p?.username)===key);
+  const hasLeaderboard=leaderboard.some(x=>normalizePlayerKey(x?.name)===key);
+  const hasBan=Object.prototype.hasOwnProperty.call(bannedPlayers,key);
+  const hasEvent=Object.prototype.hasOwnProperty.call(eventPlayers,key);
+  const hasGift=Object.prototype.hasOwnProperty.call(coinGifts,key);
+  const hasConnection=[...wss.clients].some(socket=>normalizePlayerKey(socket.__outlastPlayer?.username)===key);
+
+  if(!hasKnown&&!hasLeaderboard&&!hasBan&&!hasEvent&&!hasGift&&!hasConnection){
+    return res.status(404).json({ok:false,error:'Username not found'});
+  }
+
+  /* Remove the JSON/server identity first so subsequent lookups stop returning it. */
   deletePlayerIdentity(username);
-  res.json({ok:true,username,deleted:true});
+
+  let dbDeleted=0;
+  try{
+    if(leaderboardPool&&leaderboardDbReady){
+      const result=await leaderboardPool.query(
+        'DELETE FROM outlast_leaderboard WHERE LOWER(name)=LOWER($1)',
+        [username]
+      );
+      dbDeleted=Number(result.rowCount||0);
+    }
+  }catch(err){
+    console.error('Owner account leaderboard delete failed:',err.message);
+    return res.status(503).json({
+      ok:false,
+      error:'Account was removed from server cache, but persistent leaderboard cleanup failed. Retry the deletion.'
+    });
+  }
+
+  /* Remove feedback authored by the deleted player from the server queue. */
+  let feedbackDeleted=0;
+  const beforeFeedback=feedback.length;
+  feedback=feedback.filter(entry=>normalizePlayerKey(entry?.user||entry?.username)!==key);
+  feedbackDeleted=beforeFeedback-feedback.length;
+  if(feedbackDeleted)saveFeedback();
+
+  res.set('Cache-Control','no-store');
+  res.json({
+    ok:true,
+    username,
+    deleted:true,
+    deletedRecords:{
+      knownPlayer:hasKnown?1:0,
+      leaderboard:hasLeaderboard?1:0,
+      leaderboardDb:dbDeleted,
+      ban:hasBan?1:0,
+      event:hasEvent?1:0,
+      coinGift:hasGift?1:0,
+      feedback:feedbackDeleted,
+      connection:hasConnection?1:0
+    },
+    connectedPlayers:connected
+  });
 });
 app.post('/api/leaderboard',async(req,res)=>{
  const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
