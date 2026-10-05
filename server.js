@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.28.3';
+const SERVER_VERSION = '3.28.4';
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -24,8 +24,6 @@ const LEADERBOARD_JOURNAL_FILE = path.join(DATA_DIR, 'leaderboard.journal.json')
 const BETA_PLAYERS_FILE = path.join(DATA_DIR, 'beta-players.json');
 const COIN_GIFTS_FILE = path.join(DATA_DIR, 'coin-gifts.json');
 const GLOBAL_EVENT_FILE = path.join(DATA_DIR, 'global-event.json');
-const EVENT_PROGRESS_FILE = path.join(DATA_DIR, 'event-progress.json');
-const EVENT_PLAYERS_FILE = path.join(DATA_DIR, 'event-players.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const BANNED_PLAYERS_FILE = path.join(DATA_DIR, 'banned-players.json');
 const OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke', 'BillyBimbo'];
@@ -33,6 +31,9 @@ const CHAT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke', 'Bi
 const CHAT_TESTER_USERNAMES = ['Max', 'SS'];
 const BETA_BADGE_LIMIT = 25;
 fs.mkdirSync(DATA_DIR, { recursive: true });
+for(const legacyFile of ['event-progress.json','event-players.json']){
+  try{const legacyPath=path.join(DATA_DIR,legacyFile);if(fs.existsSync(legacyPath))fs.unlinkSync(legacyPath);}catch(_){}
+}
 
 // Leaderboards use Postgres when DATABASE_URL is configured. The JSON file remains
 // as a migration/fallback cache so the server can still boot if the database is unavailable.
@@ -106,10 +107,6 @@ if(Array.isArray(bannedPlayers)){
 }
 let globalEvent = loadJson(GLOBAL_EVENT_FILE, {active:false});
 let adminAbuse={active:false,action:'',label:'',startedAt:0,endsAt:0,startedBy:''};
-let eventProgress = loadJson(EVENT_PROGRESS_FILE, {points:0,goal:5000,startedAt:Date.now(),updatedAt:0});
-let eventPlayers = loadJson(EVENT_PLAYERS_FILE, {});
-if(!eventProgress || typeof eventProgress!=='object') eventProgress={points:0,goal:5000,startedAt:Date.now(),updatedAt:0};
-if(!eventPlayers || typeof eventPlayers!=='object' || Array.isArray(eventPlayers)) eventPlayers={};
 if(!globalEvent || typeof globalEvent!=='object') globalEvent={active:false};
 if(!coinGifts || typeof coinGifts!=='object' || Array.isArray(coinGifts)) coinGifts={};
 if(!Array.isArray(betaPlayers)) betaPlayers=[];
@@ -314,11 +311,10 @@ function enforceSocketAccess(socket,player){
 }
 function saveCoinGifts(){ const tmp=COIN_GIFTS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(coinGifts,null,2),'utf8'); fs.renameSync(tmp,COIN_GIFTS_FILE); }
 function saveGlobalEvent(){ const tmp=GLOBAL_EVENT_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(globalEvent,null,2),'utf8'); fs.renameSync(tmp,GLOBAL_EVENT_FILE); }
-function saveEventProgress(){ const tmp=EVENT_PROGRESS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventProgress,null,2),'utf8'); fs.renameSync(tmp,EVENT_PROGRESS_FILE); }
-function saveEventPlayers(){ const tmp=EVENT_PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(eventPlayers,null,2),'utf8'); fs.renameSync(tmp,EVENT_PLAYERS_FILE); }
-function eventScheduleState(){ const serverNow=Date.now(); return {id:EVENT_SCHEDULE.id,type:EVENT_SCHEDULE.type,startAt:EVENT_SCHEDULE.startAt,serverNow,live:serverNow>=EVENT_SCHEDULE.startAt}; }
-function eventContributionRequestKey(req,username){ const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim(); return ip+'|'+String(username||'Player').toLowerCase(); }
-function allowEventContribution(req,username,points){ const now=Date.now(),key=eventContributionRequestKey(req,username); const recent=(eventContributionRate.get(key)||[]).filter(x=>now-x.at<EVENT_CONTRIBUTION_WINDOW_MS); const used=recent.reduce((n,x)=>n+Number(x.points||0),0); if(used+points>EVENT_CONTRIBUTION_POINT_LIMIT){ eventContributionRate.set(key,recent); return {ok:false,retryAfter:Math.max(1,Math.ceil((EVENT_CONTRIBUTION_WINDOW_MS-(now-(recent[0]?.at||now)))/1000))}; } recent.push({at:now,points}); eventContributionRate.set(key,recent); if(eventContributionRate.size>5000){ for(const [k,v] of eventContributionRate){ if(!v.length||now-v[v.length-1].at>EVENT_CONTRIBUTION_WINDOW_MS)eventContributionRate.delete(k); } } return {ok:true}; }
+if(String(globalEvent?.type||'').toLowerCase()==='october'){
+  globalEvent={active:false};
+  try{saveGlobalEvent();}catch(_){}
+}
 function expireGlobalEventIfNeeded(){
   if(!globalEvent?.active) return false;
   const endsAt=Number(globalEvent.endsAt||0);
@@ -349,12 +345,7 @@ function addAnnouncement(message,from){
   saveAnnouncements();
   return entry;
 }
-const GLOBAL_EVENT_LABELS={october:'🎃 October Event',double_coins:'🪙 Double Coins',double_xp:'⭐ Double XP',chaos:'⚡ Global Chaos',blackout:'🌑 Global Blackout',boss_rush:'👹 Boss Rush'};
-const EVENT_SCHEDULE={id:'nightfall-october-2026',type:'october',startAt:Date.UTC(2026,9,3,15,0,0)};
-const EVENT_CONTRIBUTION_WINDOW_MS=60000;
-const EVENT_CONTRIBUTION_POINT_LIMIT=50;
-const EVENT_PLAYER_MAX_POINTS=5000;
-const EVENT_REASON_LIMITS={clue:5,mission:2,'boss-summon':10,'boss-clear':15,'event-run':3,encounter:2};
+const GLOBAL_EVENT_LABELS={double_coins:'🪙 Double Coins',double_xp:'⭐ Double XP',chaos:'⚡ Global Chaos',blackout:'🌑 Global Blackout',boss_rush:'👹 Boss Rush'};
 const ABUSE_LABELS={boss:'👹 Boss Spawn',blackout:'🌑 Blackout',speed:'💨 Enemy Speed Surge',chaos:'⚡ Chaos',powerup:'✨ Power-Up Rain',waves:'🧟 Rapid Waves',meteor:'☄️ Meteor Shower',swarm:'🧟 Mega Swarm',lootstorm:'💎 Loot Storm',frenzy:'🔥 Enemy Frenzy',stop:'■ Admin Abuse Stopped'};
 function saveKnownPlayers(){ const tmp=PLAYERS_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(knownPlayers,null,2),'utf8'); fs.renameSync(tmp,PLAYERS_FILE); }
 
@@ -416,7 +407,6 @@ function deletePlayerIdentity(username){
   betaPlayers=betaPlayers.filter(p=>String(p||'').trim().toLowerCase()!==key);
   delete bannedPlayers[key];
   delete coinGifts[key];
-  delete eventPlayers[key];
   leaderboard=leaderboard.filter(x=>String(x?.name||'').trim().toLowerCase()!==key);
   saveKnownPlayers();
   saveBannedPlayers();
@@ -499,53 +489,12 @@ function ownerPlayerList(){
 app.use(cors({origin:true}));
 // Multiplayer health endpoints.
 app.get('/health',(_req,res)=>res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size}));
-app.get('/api/health',(req,res)=>{expireGlobalEventIfNeeded();const schedule=eventScheduleState();const octoberActive=schedule.live||(globalEvent.active&&String(globalEvent.type||'')==='october');res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size,eventSchedule:{id:schedule.id,type:schedule.type,scheduledStartAt:schedule.startAt,serverNow:schedule.serverNow,live:schedule.live},globalEvent:octoberActive?globalEvent:{active:false}});});
+app.get('/api/health',(req,res)=>{expireGlobalEventIfNeeded();res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size,globalEvent});});
 
 app.use(express.json({limit:'32kb'}));
 
 app.get('/',(req,res)=>{expireGlobalEventIfNeeded();const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent});});
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
-app.get('/api/event/state',(req,res)=>{
-  expireGlobalEventIfNeeded();
-  const schedule=eventScheduleState();
-  const points=Math.max(0,Math.floor(Number(eventProgress.points)||0)),goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));
-  const percent=Math.min(100,points/goal*100);
-  const octoberActive=schedule.live||(globalEvent.active&&String(globalEvent.type||'')==='october');
-  res.set('Cache-Control','no-store');
-  res.json({ok:true,event:'october',schedule:{id:schedule.id,type:schedule.type,scheduledStartAt:schedule.startAt,serverNow:schedule.serverNow,live:schedule.live},progress:{points,goal,percent,updatedAt:Number(eventProgress.updatedAt)||0},active:Boolean(octoberActive),globalEvent:octoberActive?globalEvent:{active:false}});
-});
-app.post('/api/event/contribute',(req,res)=>{
-  const username=clean(req.body?.username,18)||'Player';
-  const reason=clean(req.body?.reason,40)||'event';
-  if(!validPlayerUsername(username))return res.status(400).json({ok:false,error:'Invalid username'});
-  if(isBannedPlayer(username))return res.status(403).json({ok:false,error:'Access unavailable for this username.'});
-  if(!Object.prototype.hasOwnProperty.call(EVENT_REASON_LIMITS,reason))return res.status(400).json({ok:false,error:'Invalid event contribution reason'});
-  const requested=Math.max(1,Math.min(25,Math.floor(Number(req.body?.points)||1)));
-  const maxForReason=EVENT_REASON_LIMITS[reason];
-  if(requested>maxForReason)return res.status(400).json({ok:false,error:'Contribution amount does not match this action'});
-  const rate=allowEventContribution(req,username,requested);
-  if(!rate.ok)return res.status(429).json({ok:false,error:'Event contribution rate limit reached',retryAfter:rate.retryAfter});
-  const key=username.toLowerCase();
-  const p=eventPlayers[key]||{username,points:0,bosses:0,updatedAt:0};
-  p.username=username;
-  p.points=Math.min(EVENT_PLAYER_MAX_POINTS,Math.max(0,Math.floor(Number(p.points)||0))+requested);
-  if(reason==='boss-clear')p.bosses=Math.min(9999,Math.floor(Number(p.bosses)||0)+1);
-  p.updatedAt=Date.now();eventPlayers[key]=p;
-  eventProgress.points=Math.min(Math.max(1,Math.floor(Number(eventProgress.goal)||5000)),Math.floor(Number(eventProgress.points)||0)+requested);
-  eventProgress.goal=Math.max(1,Math.floor(Number(eventProgress.goal)||5000));eventProgress.updatedAt=Date.now();
-  saveEventPlayers();saveEventProgress();
-  const schedule=eventScheduleState();
-  res.json({ok:true,player:p,progress:{points:eventProgress.points,goal:eventProgress.goal,percent:Math.min(100,eventProgress.points/eventProgress.goal*100),updatedAt:eventProgress.updatedAt},schedule:{scheduledStartAt:schedule.startAt,serverNow:schedule.serverNow,live:schedule.live}});
-});
-
-
-app.get('/api/event/leaderboard',(req,res)=>{
-  const limit=Math.min(100,Math.max(1,Math.floor(Number(req.query?.limit)||10)));
-  const entries=Object.values(eventPlayers).sort((a,b)=>Number(b.points||0)-Number(a.points||0)||Number(b.bosses||0)-Number(a.bosses||0)||String(a.username).localeCompare(String(b.username))).slice(0,limit);
-  res.set('Cache-Control','no-store');res.json({ok:true,entries,progress:{points:eventProgress.points,goal:eventProgress.goal,percent:Math.min(100,eventProgress.points/eventProgress.goal*100)}});
-});
-
-
 app.post('/api/players/register',(req,res)=>{
   const username=clean(req.body?.username,18);
   if(!/^[A-Za-z0-9 _-]{2,18}$/.test(username)) return res.status(400).json({ok:false,error:'Invalid username'});
@@ -600,7 +549,7 @@ app.get('/api/owner/global-event',(req,res)=>{expireGlobalEventIfNeeded();res.se
 app.post('/api/owner/global-event',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
   const action=String(req.body?.action||''); if(action==='stop'){globalEvent={active:false};saveGlobalEvent();broadcastGlobal({type:'owner_global_event',active:false});return res.json({ok:true,event:globalEvent});}
-  const eventType=String(req.body?.eventType||'october'); if(!GLOBAL_EVENT_LABELS[eventType]) return res.status(400).json({ok:false,error:'Unknown event'});
+  const eventType=String(req.body?.eventType||'double_coins'); if(!GLOBAL_EVENT_LABELS[eventType]) return res.status(400).json({ok:false,error:'Unknown event'});
   const minutes=Math.max(1,Math.min(1440,Math.floor(Number(req.body?.durationMinutes)||30)));
   globalEvent={active:true,type:eventType,label:GLOBAL_EVENT_LABELS[eventType],startedAt:Date.now(),endsAt:Date.now()+minutes*60000,startedBy:clean(req.body?.ownerUsername,18)};
   saveGlobalEvent();broadcastGlobal({type:'owner_global_event',...globalEvent});res.json({ok:true,event:globalEvent});
@@ -730,11 +679,10 @@ app.post('/api/owner/players/delete',async(req,res)=>{
   const hasKnown=knownPlayers.some(p=>normalizePlayerKey(p?.username)===key);
   const hasLeaderboard=leaderboard.some(x=>normalizePlayerKey(x?.name)===key);
   const hasBan=Object.prototype.hasOwnProperty.call(bannedPlayers,key);
-  const hasEvent=Object.prototype.hasOwnProperty.call(eventPlayers,key);
   const hasGift=Object.prototype.hasOwnProperty.call(coinGifts,key);
   const hasConnection=[...wss.clients].some(socket=>normalizePlayerKey(socket.__outlastPlayer?.username)===key);
 
-  if(!hasKnown&&!hasLeaderboard&&!hasBan&&!hasEvent&&!hasGift&&!hasConnection){
+  if(!hasKnown&&!hasLeaderboard&&!hasBan&&!hasGift&&!hasConnection){
     return res.status(404).json({ok:false,error:'Username not found'});
   }
 
@@ -840,7 +788,7 @@ app.post('/api/leaderboard',async(req,res)=>{
  res.json({ok:true,updated:true,entry:saved,serverRecord:saved,totalPlayers:leaderboard.length});
 });
 
-app.get('/api/health',(req,res)=>{expireGlobalEventIfNeeded();const onlinePlayers=connectedPlayerSnapshot();const schedule=eventScheduleState();const octoberActive=schedule.live||(globalEvent.active&&String(globalEvent.type||'')==='october');res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,rooms:rooms.size,feedback:feedback.length,globalEvent:octoberActive?globalEvent:{active:false},eventSchedule:{id:schedule.id,type:schedule.type,scheduledStartAt:schedule.startAt,serverNow:schedule.serverNow,live:schedule.live}});});
+app.get('/api/health',(req,res)=>{expireGlobalEventIfNeeded();const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,rooms:rooms.size,feedback:feedback.length,globalEvent});});
 app.get('/api/coop/status',(req,res)=>{expireGlobalEventIfNeeded();const onlinePlayers=connectedPlayerSnapshot();res.json({version:SERVER_VERSION,rooms:rooms.size,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,maxPlayers:MAX_ROOM_PLAYERS,globalEvent:globalEvent});});
 function feedbackLooksAbusive(entry){
   const text=String((entry?.title||'')+' '+(entry?.body||'')).toLowerCase();
