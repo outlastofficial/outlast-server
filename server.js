@@ -11,8 +11,8 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.29.1';
-const MAP_SYSTEM_VERSION = '3.29.1';
+const SERVER_VERSION = '3.29.2';
+const MAP_SYSTEM_VERSION = '3.29.2';
 const GAME_MAPS = {"Forest":12,"Desert":12,"Snow":12,"Lava":12,"City":12,"Hospital":12,"Laboratory":12,"Subway":12,"Prison":12,"MilitaryBase":12,"RuinedTown":12,"Harbor":12,"Bunker":12,"Swamp":12,"Skyscraper":12,"Wasteland":12};
 
 const DATA_DIR = process.env.OUTLAST_DATA_DIR || path.join(__dirname, 'data');
@@ -732,6 +732,29 @@ app.post('/api/owner/players/delete',async(req,res)=>{
     },
     connectedPlayers:connected
   });
+});
+app.get('/api/leaderboard',async(req,res)=>{
+ const mode=clean(req.query?.mode,30);
+ const difficulty=clean(req.query?.difficulty,30);
+ const limit=Math.min(100,Math.max(1,Number(req.query?.limit)||100));
+ try{
+   let entries=await readLeaderboardDb(mode,difficulty,limit);
+   if(entries===null){
+     entries=normalizeLeaderboard(leaderboard);
+     if(mode)entries=entries.filter(x=>String(x.mode||'Classic').toLowerCase()===String(mode).toLowerCase());
+     if(difficulty)entries=entries.filter(x=>String(x.difficulty||'Normal').toLowerCase()===String(difficulty).toLowerCase());
+     entries=entries.slice(0,limit);
+   }
+   res.set('Cache-Control','no-store');
+   res.json({ok:true,version:SERVER_VERSION,mapSystemVersion:MAP_SYSTEM_VERSION,mode:mode||'',difficulty:difficulty||'',entries});
+ }catch(err){
+   console.error('Leaderboard read failed:',err.message);
+   let entries=normalizeLeaderboard(leaderboard);
+   if(mode)entries=entries.filter(x=>String(x.mode||'Classic').toLowerCase()===String(mode).toLowerCase());
+   if(difficulty)entries=entries.filter(x=>String(x.difficulty||'Normal').toLowerCase()===String(difficulty).toLowerCase());
+   res.set('Cache-Control','no-store');
+   res.json({ok:true,version:SERVER_VERSION,mapSystemVersion:MAP_SYSTEM_VERSION,mode:mode||'',difficulty:difficulty||'',entries:entries.slice(0,limit),storage:'json-fallback'});
+ }
 });
 app.post('/api/leaderboard',async(req,res)=>{
  const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
