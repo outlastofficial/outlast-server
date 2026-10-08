@@ -1,0 +1,25 @@
+name: OUTLAST server v3.37.0 regression
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "server.js"
+      - "package.json"
+      - "tests/owner-access-v3360.test.js"
+      - "tests/v3370-owner-access.test.js"
+      - ".github/workflows/outlast-server-v3.37-check.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate server syntax
+        run: node --check server.js
+      - name: Run owner access regression
+        run: node tests/v3370-owner-access.test.js
