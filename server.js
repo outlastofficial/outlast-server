@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.36.0';
+const SERVER_VERSION = '3.37.0';
 const MAP_SYSTEM_VERSION = '3.30.0';
 const GAME_MAPS = {"Forest":12,"Desert":12,"Snow":12,"Lava":12,"City":12,"Hospital":12,"Laboratory":12,"Subway":12,"Prison":12,"MilitaryBase":12,"RuinedTown":12,"Harbor":12,"Bunker":12,"Swamp":12,"Skyscraper":12,"Wasteland":12};
 
@@ -28,7 +28,13 @@ const COIN_GIFTS_FILE = path.join(DATA_DIR, 'coin-gifts.json');
 const GLOBAL_EVENT_FILE = path.join(DATA_DIR, 'global-event.json');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const BANNED_PLAYERS_FILE = path.join(DATA_DIR, 'banned-players.json');
-const OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke', 'BillyBimbo'];
+const DEFAULT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke', 'BillyBimbo'];
+const OWNER_USERNAMES = Array.from(new Set(
+  String(process.env.OUTLAST_OWNER_USERNAMES || DEFAULT_OWNER_USERNAMES.join(','))
+    .split(',')
+    .map(v=>clean(v,18))
+    .filter(Boolean)
+));
 const CHAT_OWNER_USERNAMES = ['BestGamer', 'Landon', 'Phone Landon', 'Poke', 'BillyBimbo'];
 const CHAT_TESTER_USERNAMES = ['Max', 'SS'];
 const BETA_BADGE_LIMIT = 25;
@@ -458,7 +464,6 @@ function broadcastRoom(room,payload,exceptId=null){ for(const player of room.pla
 
 function isOwnerRequest(req){
   const owner=clean(req.body?.ownerUsername || req.query?.ownerUsername,18);
-  /* Owner permission is tied to the recognized owner account name; normal player login is unaffected. */
   return OWNER_USERNAMES.some(name=>owner.toLowerCase()===name.toLowerCase());
 }
 function ownerPlayerList(){
@@ -493,6 +498,13 @@ app.get('/health',(_req,res)=>res.status(200).json({ok:true,service:'outlast-ser
 app.get('/api/health',(req,res)=>{expireGlobalEventIfNeeded();res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size,globalEvent});});
 
 app.use(express.json({limit:'32kb'}));
+app.get('/api/owner/access',(req,res)=>{
+  const owner=clean(req.query?.ownerUsername,18);
+  const ok=OWNER_USERNAMES.some(name=>owner.toLowerCase()===name.toLowerCase());
+  res.set('Cache-Control','no-store');
+  if(!ok)return res.status(403).json({ok:false,error:'Owner authorization required'});
+  res.json({ok:true,owner:true,username:owner});
+});
 app.use('/api/owner',(req,res,next)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
   next();
