@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '3.30.0';
+const SERVER_VERSION = '3.36.0';
 const MAP_SYSTEM_VERSION = '3.30.0';
 const GAME_MAPS = {"Forest":12,"Desert":12,"Snow":12,"Lava":12,"City":12,"Hospital":12,"Laboratory":12,"Subway":12,"Prison":12,"MilitaryBase":12,"RuinedTown":12,"Harbor":12,"Bunker":12,"Swamp":12,"Skyscraper":12,"Wasteland":12};
 
@@ -494,6 +494,10 @@ app.get('/health',(_req,res)=>res.status(200).json({ok:true,service:'outlast-ser
 app.get('/api/health',(req,res)=>{expireGlobalEventIfNeeded();res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size,globalEvent});});
 
 app.use(express.json({limit:'32kb'}));
+app.use('/api/owner',(req,res,next)=>{
+  if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
+  next();
+});
 
 app.get('/',(req,res)=>{expireGlobalEventIfNeeded();const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent});});
 app.get('/api/challenge/today',(req,res)=>res.json(challengeForDate(new Date().toISOString().slice(0,10))));
@@ -547,7 +551,7 @@ app.post('/api/chat',(req,res)=>{
 });
 
 
-app.get('/api/owner/global-event',(req,res)=>{expireGlobalEventIfNeeded();res.set('Cache-Control','no-store');res.json({ok:true,...globalEvent});});
+app.get('/api/owner/global-event',(req,res)=>{if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});expireGlobalEventIfNeeded();res.set('Cache-Control','no-store');res.json({ok:true,...globalEvent});});
 app.post('/api/owner/global-event',(req,res)=>{
   if(!isOwnerRequest(req)) return res.status(403).json({ok:false,error:'Owner authorization required'});
   const action=String(req.body?.action||''); if(action==='stop'){globalEvent={active:false};saveGlobalEvent();broadcastGlobal({type:'owner_global_event',active:false});return res.json({ok:true,event:globalEvent});}
