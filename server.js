@@ -458,8 +458,7 @@ function broadcastRoom(room,payload,exceptId=null){ for(const player of room.pla
 
 function isOwnerRequest(req){
   const owner=clean(req.body?.ownerUsername || req.query?.ownerUsername,18);
-  /* v3.28.2: owner permission is tied to the recognized owner account name.
-     The separate owner-password gate is intentionally removed; normal player login is unaffected. */
+  /* Owner permission is tied to the recognized owner account name; normal player login is unaffected. */
   return OWNER_USERNAMES.some(name=>owner.toLowerCase()===name.toLowerCase());
 }
 function ownerPlayerList(){
