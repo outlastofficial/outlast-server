@@ -491,6 +491,8 @@ app.use(cors({origin:true}));
 // Multiplayer health endpoints.
 app.get('/health',(_req,res)=>res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size}));
 app.get('/api/health',(req,res)=>{expireGlobalEventIfNeeded();res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size,globalEvent});});
+// Legacy client compatibility: the retired event UI may still poll this endpoint. Keep it inactive.
+app.get('/api/event/state',(_req,res)=>res.status(200).json({ok:true,active:false,event:null,legacyEvent:false,version:SERVER_VERSION}));
 
 app.use(express.json({limit:'32kb'}));
 app.use('/api/owner',(req,res,next)=>{if(!isOwnerRequest(req))return res.status(403).json({ok:false,error:'Owner authorization required'});next();});
