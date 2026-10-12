@@ -1,0 +1,16 @@
+const assert=require('assert');
+const fs=require('fs');
+const path=require('path');
+const root=path.join(__dirname,'..');
+const server=fs.readFileSync(path.join(root,'server.js'),'utf8');
+const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+assert.strictEqual(pkg.version,'4.1.0','server package version must match OUTLAST v4.1.0');
+assert(server.includes("const SERVER_VERSION = '4.1.0';"),'server health/version endpoints must report v4.1.0');
+assert(server.includes("const MAP_SYSTEM_VERSION = '4.1.0';"),'map registry version must match v4.1.0');
+const match=server.match(/const GAME_MAPS = (\{[^;]+\});/);
+assert(match,'server must define a map registry');
+const maps=JSON.parse(match[1]);
+const expected=['Forest','Desert','Snow','Lava','City','Hospital','Laboratory','Subway','Prison','MilitaryBase','RuinedTown','Harbor','Bunker','Swamp','Skyscraper','Wasteland','Seizure','Ribhouse'];
+for(const map of expected)assert(Object.prototype.hasOwnProperty.call(maps,map),'server map registry is missing '+map);
+assert.strictEqual(Object.keys(maps).length,18,'server should expose exactly 18 built-in maps');
+console.log('OUTLAST server v4.1.0 map registry checks passed');
