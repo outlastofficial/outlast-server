@@ -24,3 +24,5 @@ jobs:
         run: node tests/owner-access-v3360.test.js
       - name: Package version
         run: node -e "const p=require('./package.json'); if(p.version!=='4.1.0') throw new Error('server package version mismatch')"
+      - name: Map registry and version check
+        run: node tests/map-registry-v410.test.js
