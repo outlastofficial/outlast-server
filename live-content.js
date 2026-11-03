@@ -92,7 +92,7 @@ function buildLiveContent(now = Date.now()) {
   const weeklyIndex = Math.floor((timestamp - WEEKLY_UPDATE_ANCHOR) / WEEK_INTERVAL);
   const weeklyStart = WEEKLY_UPDATE_ANCHOR + weeklyIndex * WEEK_INTERVAL;
   const weeklyEnd = weeklyStart + WEEKLY_UPDATE_DURATION;
-  const activeWeekly = timestamp >= weeklyStart && timestamp < weeklyEnd;
+  const activeWeekly = timestamp >= WEEKLY_UPDATE_ANCHOR && timestamp >= weeklyStart && timestamp < weeklyEnd;
   const upcomingWeeklyIndex = activeWeekly ? weeklyIndex + 1 : (timestamp < weeklyStart ? weeklyIndex : weeklyIndex + 1);
   const upcomingWeeklyStart = WEEKLY_UPDATE_ANCHOR + upcomingWeeklyIndex * WEEK_INTERVAL;
   const selectedWeeklyIndex = activeWeekly ? weeklyIndex : upcomingWeeklyIndex;
