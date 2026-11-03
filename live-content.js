@@ -99,10 +99,12 @@ function buildLiveContent(now = Date.now()) {
   const selectedWeekendMonth = new Date(activeWeekend ? weekendStart : upcomingWeekendStart).getUTCMonth();
   const weekendMeta = weekendForIndex(selectedWeekendIndex, selectedWeekendMonth);
 
-  const monthlyStart = lastThreeDaysStartUtc(year, month);
-  const monthlyActive = timestamp >= monthlyStart;
+  // The monthly story is the always-on season layer. Weekend chapters and
+  // three-day additions are separate overlays that run alongside it.
+  const monthlyStart = currentMonthStart;
+  const monthlyActive = timestamp >= currentMonthStart && timestamp < currentMonthEnd;
   const nextMonth = new Date(currentMonthEnd);
-  const nextMonthlyStart = lastThreeDaysStartUtc(nextMonth.getUTCFullYear(), nextMonth.getUTCMonth());
+  const nextMonthlyStart = currentMonthEnd;
   const monthlyRecap = [];
   for (let i = 0; i <= smallIndex; i++) {
     const at = SMALL_ANCHOR + i * SMALL_INTERVAL;
@@ -121,7 +123,7 @@ function buildLiveContent(now = Date.now()) {
   const monthlyEvent = {
     id: `monthly-${year}-${String(month + 1).padStart(2, '0')}`,
     theme,
-    title: `${theme}: Monthly Finale`,
+    title: `${theme}: Monthly Event`,
     active: monthlyActive,
     startsAt: monthlyStart,
     endsAt: currentMonthEnd,
