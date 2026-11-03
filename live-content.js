@@ -4,8 +4,8 @@ const DAY = 24 * 60 * 60 * 1000;
 const SMALL_INTERVAL = 3 * DAY;
 const WEEK_INTERVAL = 7 * DAY;
 const SMALL_ANCHOR = Date.UTC(2026, 10, 3, 0, 0, 0);
-const WEEKEND_ANCHOR = Date.UTC(2026, 10, 6, 17, 0, 0);
-const WEEKEND_DURATION = 3 * DAY;
+const WEEKLY_UPDATE_ANCHOR = Date.UTC(2026, 10, 7, 0, 0, 0);
+const WEEKLY_UPDATE_DURATION = 7 * DAY;
 
 const SMALL_ADDITIONS = [
   { id: 'field-scanner', title: 'Field Scanner', category: 'Utility', description: 'A new field report highlights a rotating enemy weakness for this cycle.' },
@@ -51,7 +51,7 @@ const MONTH_THEMES = {
   4: 'Biohazard Protocol', 5: 'The Last Colony', 6: 'Project Extinction', 7: 'The Underground',
   8: 'The Return', 9: 'Nightmare Month', 10: 'Project Blackout', 11: 'Winter Apocalypse'
 };
-const WEEKEND_PARTS = [
+const WEEKLY_UPDATE_PARTS = [
   { subtitle: 'The Signal', objective: 'Investigate the first blackout signal and recover the missing field report.', reward: 'Blackout Intel I' },
   { subtitle: 'The Power Station', objective: 'Trace the signal to the power station and uncover who restarted the grid.', reward: 'Blackout Intel II' },
   { subtitle: 'The Containment Breach', objective: 'Track the outbreak into containment and uncover the source of the mutations.', reward: 'Blackout Intel III' },
@@ -62,11 +62,11 @@ function monthStartUtc(year, month) { return Date.UTC(year, month, 1); }
 function monthEndUtc(year, month) { return Date.UTC(year, month + 1, 1); }
 function lastThreeDaysStartUtc(year, month) { return monthEndUtc(year, month) - 3 * DAY; }
 function monthTheme(month) { return MONTH_THEMES[month] || 'Outbreak Investigation'; }
-function weekendForIndex(index, month) {
-  const partNumber = ((index % WEEKEND_PARTS.length) + WEEKEND_PARTS.length) % WEEKEND_PARTS.length + 1;
-  const part = WEEKEND_PARTS[partNumber - 1];
+function weeklyUpdateForIndex(index, month) {
+  const partNumber = ((index % WEEKLY_UPDATE_PARTS.length) + WEEKLY_UPDATE_PARTS.length) % WEEKLY_UPDATE_PARTS.length + 1;
+  const part = WEEKLY_UPDATE_PARTS[partNumber - 1];
   return {
-    id: `weekend-${index + 1}`,
+    id: `weekly-update-${index + 1}`,
     title: `${monthTheme(month)} — Part ${partNumber}`,
     subtitle: part.subtitle,
     part: partNumber,
@@ -89,15 +89,15 @@ function buildLiveContent(now = Date.now()) {
   const smallEnd = smallStart + SMALL_INTERVAL;
   const smallItem = SMALL_ADDITIONS[smallIndex % SMALL_ADDITIONS.length];
 
-  const weekendIndex = Math.floor((timestamp - WEEKEND_ANCHOR) / WEEK_INTERVAL);
-  const weekendStart = WEEKEND_ANCHOR + weekendIndex * WEEK_INTERVAL;
-  const weekendEnd = weekendStart + WEEKEND_DURATION;
-  const activeWeekend = timestamp >= weekendStart && timestamp < weekendEnd;
-  const upcomingWeekendIndex = activeWeekend ? weekendIndex + 1 : (timestamp < weekendStart ? weekendIndex : weekendIndex + 1);
-  const upcomingWeekendStart = WEEKEND_ANCHOR + upcomingWeekendIndex * WEEK_INTERVAL;
-  const selectedWeekendIndex = activeWeekend ? weekendIndex : upcomingWeekendIndex;
-  const selectedWeekendMonth = new Date(activeWeekend ? weekendStart : upcomingWeekendStart).getUTCMonth();
-  const weekendMeta = weekendForIndex(selectedWeekendIndex, selectedWeekendMonth);
+  const weeklyIndex = Math.floor((timestamp - WEEKLY_UPDATE_ANCHOR) / WEEK_INTERVAL);
+  const weeklyStart = WEEKLY_UPDATE_ANCHOR + weeklyIndex * WEEK_INTERVAL;
+  const weeklyEnd = weeklyStart + WEEKLY_UPDATE_DURATION;
+  const activeWeekly = timestamp >= weeklyStart && timestamp < weeklyEnd;
+  const upcomingWeeklyIndex = activeWeekly ? weeklyIndex + 1 : (timestamp < weeklyStart ? weeklyIndex : weeklyIndex + 1);
+  const upcomingWeeklyStart = WEEKLY_UPDATE_ANCHOR + upcomingWeeklyIndex * WEEK_INTERVAL;
+  const selectedWeeklyIndex = activeWeekly ? weeklyIndex : upcomingWeeklyIndex;
+  const selectedWeeklyMonth = new Date(activeWeekly ? weeklyStart : upcomingWeeklyStart).getUTCMonth();
+  const weeklyMeta = weeklyUpdateForIndex(selectedWeeklyIndex, selectedWeeklyMonth);
 
   // The monthly story is the always-on season layer. Weekend chapters and
   // three-day additions are separate overlays that run alongside it.
@@ -112,11 +112,11 @@ function buildLiveContent(now = Date.now()) {
       monthlyRecap.push(SMALL_ADDITIONS[i % SMALL_ADDITIONS.length].title);
     }
   }
-  const weekendRecap = [];
+  const weeklyRecap = [];
   for (let i = 0; i < 100; i++) {
-    const at = WEEKEND_ANCHOR + i * WEEK_INTERVAL;
+    const at = WEEKLY_UPDATE_ANCHOR + i * WEEK_INTERVAL;
     if (at >= currentMonthStart && at < currentMonthEnd && at <= timestamp) {
-      weekendRecap.push(weekendForIndex(i, new Date(at).getUTCMonth()).title);
+      weeklyRecap.push(weeklyUpdateForIndex(i, new Date(at).getUTCMonth()).title);
     }
   }
   const theme = monthTheme(month);
@@ -127,8 +127,8 @@ function buildLiveContent(now = Date.now()) {
     active: monthlyActive,
     startsAt: monthlyStart,
     endsAt: currentMonthEnd,
-    objective: 'Bring together this month’s field reports, weekend chapters, and discoveries for the final operation.',
-    monthlyRecap: [...monthlyRecap, ...weekendRecap].slice(-12)
+    objective: 'Bring together this month’s field reports, weekly updates, and discoveries for the final operation.',
+    monthlyRecap: [...monthlyRecap, ...weeklyRecap].slice(-12)
   };
 
   return {
@@ -137,18 +137,18 @@ function buildLiveContent(now = Date.now()) {
     timezone: 'UTC',
     serverTime: date.toISOString(),
     smallAddition: { ...smallItem, cycle: smallIndex + 1, startsAt: smallStart, endsAt: smallEnd, nextAt: smallEnd },
-    weekendEvent: {
-      ...weekendMeta,
-      active: activeWeekend,
-      startsAt: activeWeekend ? weekendStart : upcomingWeekendStart,
-      endsAt: activeWeekend ? weekendEnd : upcomingWeekendStart + WEEKEND_DURATION,
-      nextAt: upcomingWeekendStart
+    weeklyEvent: {
+      ...weeklyMeta,
+      active: activeWeekly,
+      startsAt: activeWeekly ? weeklyStart : upcomingWeeklyStart,
+      endsAt: activeWeekly ? weeklyEnd : upcomingWeeklyStart + WEEKLY_UPDATE_DURATION,
+      nextAt: upcomingWeeklyStart
     },
     monthlyEvent,
     nextSmallAdditionAt: smallEnd,
-    nextWeekendEventAt: upcomingWeekendStart,
+    nextWeeklyEventAt: upcomingWeeklyStart,
     nextMonthlyEventAt: monthlyActive ? nextMonthlyStart : monthlyStart
   };
 }
 
-module.exports = { buildLiveContent, SMALL_INTERVAL, WEEKEND_DURATION, SMALL_ANCHOR, WEEKEND_ANCHOR };
+module.exports = { buildLiveContent, SMALL_INTERVAL, WEEKLY_UPDATE_DURATION, SMALL_ANCHOR, WEEKLY_UPDATE_ANCHOR };
