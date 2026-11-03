@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { buildLiveContent } = require('../live-content');
+const { buildLiveContent, SMALL_ANCHOR, SMALL_INTERVAL } = require('../live-content');
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -42,4 +42,9 @@ test('response includes UTC server time and next scheduled drops', () => {
   assert.ok(result.nextSmallAdditionAt > now);
   assert.ok(result.nextWeekendEventAt > now);
   assert.ok(result.nextMonthlyEventAt > now);
+});
+
+test('the first 36 three-day drops have unique content', () => {
+  const ids = Array.from({ length: 36 }, (_, index) => buildLiveContent(SMALL_ANCHOR + index * SMALL_INTERVAL).smallAddition.id);
+  assert.equal(new Set(ids).size, 36);
 });
