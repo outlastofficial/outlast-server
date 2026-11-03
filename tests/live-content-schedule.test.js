@@ -25,14 +25,19 @@ test('weekend event opens Friday and closes Monday, with sequential chapters', (
   assert.match(after.weekendEvent.title, /Part 2/);
 });
 
-test('monthly finale begins in the final three days and recaps that month', () => {
-  const before = buildLiveContent(Date.UTC(2026, 10, 27, 23, 59));
-  const live = buildLiveContent(Date.UTC(2026, 10, 28, 0));
-  assert.equal(before.monthlyEvent.active, false);
-  assert.equal(live.monthlyEvent.active, true);
-  assert.equal(live.monthlyEvent.theme, 'Project Blackout');
-  assert.ok(Array.isArray(live.monthlyEvent.monthlyRecap));
-  assert.ok(live.monthlyEvent.monthlyRecap.length > 0);
+test('monthly event runs from the first day through the whole month', () => {
+  const firstDay = buildLiveContent(Date.UTC(2026, 10, 1, 0));
+  const midMonth = buildLiveContent(Date.UTC(2026, 10, 15, 12));
+  const lastDay = buildLiveContent(Date.UTC(2026, 10, 30, 23, 59));
+  const nextMonth = buildLiveContent(Date.UTC(2026, 11, 1, 0));
+  assert.equal(firstDay.monthlyEvent.active, true);
+  assert.equal(midMonth.monthlyEvent.active, true);
+  assert.equal(lastDay.monthlyEvent.active, true);
+  assert.equal(nextMonth.monthlyEvent.active, true);
+  assert.equal(firstDay.monthlyEvent.startsAt, Date.UTC(2026, 10, 1, 0));
+  assert.equal(firstDay.monthlyEvent.endsAt, Date.UTC(2026, 11, 1, 0));
+  assert.equal(firstDay.monthlyEvent.theme, 'Project Blackout');
+  assert.ok(Array.isArray(midMonth.monthlyEvent.monthlyRecap));
 });
 
 test('response includes UTC server time and next scheduled drops', () => {
@@ -47,4 +52,12 @@ test('response includes UTC server time and next scheduled drops', () => {
 test('the first 36 three-day drops have unique content', () => {
   const ids = Array.from({ length: 36 }, (_, index) => buildLiveContent(SMALL_ANCHOR + index * SMALL_INTERVAL).smallAddition.id);
   assert.equal(new Set(ids).size, 36);
+});
+
+
+test('monthly event overlaps the weekend event and three-day addition', () => {
+  const result = buildLiveContent(Date.UTC(2026, 10, 7, 12));
+  assert.equal(result.monthlyEvent.active, true);
+  assert.equal(result.weekendEvent.active, true);
+  assert.equal(result.smallAddition.id, 'field-scanner');
 });
