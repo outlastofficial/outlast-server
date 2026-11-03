@@ -14,15 +14,19 @@ test('small additions rotate on a fixed 72-hour server schedule', () => {
   assert.equal(first.smallAddition.nextAt - first.smallAddition.startsAt, 3 * DAY);
 });
 
-test('weekend event opens Friday and closes Monday, with sequential chapters', () => {
-  const before = buildLiveContent(Date.UTC(2026, 10, 6, 16, 59));
-  const live = buildLiveContent(Date.UTC(2026, 10, 6, 17));
-  const after = buildLiveContent(Date.UTC(2026, 10, 9, 17));
-  assert.equal(before.weekendEvent.active, false);
-  assert.equal(live.weekendEvent.active, true);
-  assert.match(live.weekendEvent.title, /Part 1/);
-  assert.equal(after.weekendEvent.active, false);
-  assert.match(after.weekendEvent.title, /Part 2/);
+test('weekly update event opens Saturday and runs through the following Saturday', () => {
+  const before = buildLiveContent(Date.UTC(2026, 10, 6, 23, 59));
+  const live = buildLiveContent(Date.UTC(2026, 10, 7, 0));
+  const midweek = buildLiveContent(Date.UTC(2026, 10, 11, 12));
+  const next = buildLiveContent(Date.UTC(2026, 10, 14, 0));
+  assert.equal(before.weeklyEvent.active, false);
+  assert.equal(live.weeklyEvent.active, true);
+  assert.equal(midweek.weeklyEvent.active, true);
+  assert.match(live.weeklyEvent.title, /Part 1/);
+  assert.equal(live.weeklyEvent.startsAt, Date.UTC(2026, 10, 7, 0));
+  assert.equal(live.weeklyEvent.endsAt, Date.UTC(2026, 10, 14, 0));
+  assert.equal(next.weeklyEvent.active, true);
+  assert.match(next.weeklyEvent.title, /Part 2/);
 });
 
 test('monthly event runs from the first day through the whole month', () => {
@@ -45,7 +49,7 @@ test('response includes UTC server time and next scheduled drops', () => {
   const result = buildLiveContent(now);
   assert.equal(result.serverTime, new Date(now).toISOString());
   assert.ok(result.nextSmallAdditionAt > now);
-  assert.ok(result.nextWeekendEventAt > now);
+  assert.ok(result.nextWeeklyEventAt > now);
   assert.ok(result.nextMonthlyEventAt > now);
 });
 
@@ -55,9 +59,9 @@ test('the first 36 three-day drops have unique content', () => {
 });
 
 
-test('monthly event overlaps the weekend event and three-day addition', () => {
+test('monthly event overlaps the weekly event and three-day addition', () => {
   const result = buildLiveContent(Date.UTC(2026, 10, 7, 12));
   assert.equal(result.monthlyEvent.active, true);
-  assert.equal(result.weekendEvent.active, true);
+  assert.equal(result.weeklyEvent.active, true);
   assert.equal(result.smallAddition.id, 'supply-cache');
 });
