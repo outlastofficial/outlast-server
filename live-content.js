@@ -12,7 +12,7 @@ const SMALL_ADDITIONS = [
   { id: 'supply-cache', title: 'Sealed Supply Cache', category: 'Loot', description: 'A new cache discovery joins the rotating content catalogue, with a fresh collection entry to find.' },
   { id: 'mutant-tracker', title: 'Mutant Tracker', category: 'Enemy Intel', description: 'A new mutation profile is added to the outbreak reports, expanding the enemy lore and weekly briefing.' },
   { id: 'survivor-contract', title: 'Survivor Contract', category: 'Challenge', description: 'A new optional survival objective is featured for this content cycle.' },
-  { id: 'weapon-blueprint', title: 'Recovered Blueprint', category: 'Gear', description: 'A new weapon blueprint entry is added to the rotating archive.' },
+  { id: 'gear-schematic', title: 'Recovered Gear Schematic', category: 'Equipment', description: 'A new equipment schematic entry is added to the rotating archive.' },
   { id: 'hidden-transmission', title: 'Hidden Transmission', category: 'Secret', description: 'A new encrypted clue appears in the monthly investigation.' },
   { id: 'elite-sighting', title: 'Elite Sighting', category: 'Enemy', description: 'A new elite enemy profile is added to the threat index.' },
   { id: 'relic-fragment', title: 'Relic Fragment', category: 'Collectible', description: 'A new relic fragment is added to the monthly collection trail.' },
