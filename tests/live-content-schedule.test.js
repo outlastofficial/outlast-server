@@ -59,5 +59,5 @@ test('monthly event overlaps the weekend event and three-day addition', () => {
   const result = buildLiveContent(Date.UTC(2026, 10, 7, 12));
   assert.equal(result.monthlyEvent.active, true);
   assert.equal(result.weekendEvent.active, true);
-  assert.equal(result.smallAddition.id, 'field-scanner');
+  assert.equal(result.smallAddition.id, 'supply-cache');
 });
