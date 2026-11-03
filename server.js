@@ -6,6 +6,7 @@ const cors = require('cors');
 const WebSocket = require('ws');
 const { Pool } = require('pg');
 const { initDiscord } = require('./discord-bot');
+const { buildLiveContent } = require('./live-content');
 
 const app = express();
 const server = http.createServer(app);
@@ -493,6 +494,9 @@ app.get('/health',(_req,res)=>res.status(200).json({ok:true,service:'outlast-ser
 app.get('/api/health',(req,res)=>{expireGlobalEventIfNeeded();res.status(200).json({ok:true,service:'outlast-server',version:SERVER_VERSION,players:wss.clients.size,globalEvent});});
 // Legacy client compatibility: the retired event UI may still poll this endpoint. Keep it inactive.
 app.get('/api/event/state',(_req,res)=>res.status(200).json({ok:true,active:false,event:null,legacyEvent:false,version:SERVER_VERSION}));
+
+// Server-authoritative live content schedule: 72-hour drops, Friday-to-Monday events, and month-end finales.
+app.get('/api/live-content',(req,res)=>{res.set({'Cache-Control':'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0','Pragma':'no-cache','Expires':'0'});res.json(buildLiveContent(Date.now()));});
 
 app.use(express.json({limit:'32kb'}));
 app.use('/api/owner',(req,res,next)=>{if(!isOwnerRequest(req))return res.status(403).json({ok:false,error:'Owner authorization required'});next();});
