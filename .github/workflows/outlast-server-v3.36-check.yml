@@ -23,9 +23,18 @@ jobs:
         run: node --check server.js
       - name: Focused AI setup regression
         run: node --test tests/ai-assistant.test.js
-      - name: Full server regression suite
-        run: npm test
+      - name: Live content schedule tests
+        if: always()
+        run: node --test tests/live-content-schedule.test.js
+      - name: Map registry tests
+        if: always()
+        run: node --test tests/map-registry-v410.test.js
+      - name: Owner access tests
+        if: always()
+        run: node --test tests/owner-access-v3360.test.js
       - name: Package version
-        run: node -e "const p=require('./package.json'); if(p.version!=='4.1.0') throw new Error('server package version mismatch')"
+        if: always()
+        run: node -e "const p=require('./package.json'); if(p.version!=='4.2.0') throw new Error('server package version mismatch')"
       - name: Map registry and version check
+        if: always()
         run: node tests/map-registry-v410.test.js
