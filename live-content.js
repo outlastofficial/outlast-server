@@ -4,7 +4,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const SMALL_INTERVAL = 3 * DAY;
 const WEEK_INTERVAL = 7 * DAY;
 const SMALL_ANCHOR = Date.UTC(2026, 10, 3, 0, 0, 0);
-const WEEKLY_UPDATE_ANCHOR = Date.UTC(2026, 10, 7, 0, 0, 0);
+const WEEKLY_UPDATE_ANCHOR = Date.UTC(2026, 10, 7, 5, 0, 0);
 const WEEKLY_UPDATE_DURATION = 7 * DAY;
 
 const SMALL_ADDITIONS = [
