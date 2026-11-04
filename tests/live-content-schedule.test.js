@@ -24,7 +24,10 @@ test('weekly update event opens Saturday and runs through the following Saturday
   assert.equal(midweek.weeklyEvent.active, true);
   assert.match(live.weeklyEvent.title, /Part 1/);
   assert.equal(live.weeklyEvent.startsAt, Date.UTC(2026, 10, 7, 5));
-  assert.equal(new Date(live.weeklyEvent.startsAt).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'long', hour: 'numeric', hour12: true }), 'Saturday, 12 AM');
+  const easternParts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long', hour: 'numeric', hour12: true }).formatToParts(new Date(live.weeklyEvent.startsAt)).map(part => [part.type, part.value]));
+  assert.equal(easternParts.weekday, 'Saturday');
+  assert.equal(easternParts.hour, '12');
+  assert.equal(easternParts.dayPeriod, 'AM');
   assert.equal(live.weeklyEvent.endsAt, Date.UTC(2026, 10, 14, 5));
   assert.equal(next.weeklyEvent.active, true);
   assert.match(next.weeklyEvent.title, /Part 2/);
