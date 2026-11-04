@@ -1,0 +1,49 @@
+name: OUTLAST production live content schedule
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'live-content.js'
+      - 'server.js'
+      - 'package.json'
+      - 'tests/live-content-schedule.test.js'
+      - '.github/workflows/live-content-schedule.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  production-live-content:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Run all server regression tests
+        run: npm test
+      - name: Verify production live-content API after Render deploy
+        run: |
+          node --input-type=module -e '
+          let lastError;
+          for (let attempt = 1; attempt <= 36; attempt++) {
+            try {
+              const r = await fetch("https://outlast-server.onrender.com/api/live-content", { cache: "no-store" });
+              if (!r.ok) throw new Error("HTTP " + r.status);
+              const d = await r.json();
+              if (!d.ok || !d.smallAddition || !d.weeklyEvent || !d.monthlyEvent || d.timezone !== "UTC" || d.weeklyTimezone !== "America/New_York") throw new Error("Incomplete schedule payload");
+              const start = new Date(d.weeklyEvent.startsAt);
+              const local = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "long", hour: "numeric", minute: "numeric", hour12: true }).format(start);
+              if (!local.includes("Saturday") || !local.includes("12:00 AM")) throw new Error("Weekly chapter is not scheduled for Saturday midnight Eastern: " + local);
+              console.log("Production live content API passed:", d.smallAddition.title, d.weeklyEvent.title, d.monthlyEvent.title, local);
+              process.exit(0);
+            } catch (error) {
+              lastError = error;
+              console.log("Waiting for production Render deploy (" + attempt + "/36): " + error.message);
+              await new Promise(resolve => setTimeout(resolve, 10000));
+            }
+          }
+          throw lastError || new Error("Production API did not become ready");
+          '
