@@ -7,12 +7,13 @@ const WebSocket = require('ws');
 const { Pool } = require('pg');
 const { initDiscord } = require('./discord-bot');
 const { buildLiveContent } = require('./live-content');
+const { createAiAssistant } = require('./ai-assistant');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 10000;
-const SERVER_VERSION = '4.1.0';
+const SERVER_VERSION = '4.2.0';
 const MAP_SYSTEM_VERSION = '4.1.0';
 const GAME_MAPS = {"Forest":12,"Desert":12,"Snow":12,"Lava":12,"City":12,"Hospital":12,"Laboratory":12,"Subway":12,"Prison":12,"MilitaryBase":12,"RuinedTown":12,"Harbor":12,"Bunker":12,"Swamp":12,"Skyscraper":12,"Wasteland":12,"Seizure":12,"Ribhouse":12};
 
@@ -499,6 +500,7 @@ app.get('/api/event/state',(_req,res)=>res.status(200).json({ok:true,active:fals
 app.get('/api/live-content',(req,res)=>{res.set({'Cache-Control':'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0','Pragma':'no-cache','Expires':'0'});res.json(buildLiveContent(Date.now()));});
 
 app.use(express.json({limit:'32kb'}));
+createAiAssistant({ app, dataDir: DATA_DIR });
 app.use('/api/owner',(req,res,next)=>{if(!isOwnerRequest(req))return res.status(403).json({ok:false,error:'Owner authorization required'});next();});
 
 app.get('/',(req,res)=>{expireGlobalEventIfNeeded();const onlinePlayers=connectedPlayerSnapshot();res.json({status:'online',game:'OUTLAST',version:SERVER_VERSION,players:onlinePlayers.length,connections:wss.clients.size,onlinePlayers,feedback:feedback.length,rooms:rooms.size,globalEvent:globalEvent});});
