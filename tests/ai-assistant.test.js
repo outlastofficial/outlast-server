@@ -20,3 +20,36 @@ test('player route calls Responses API without storing the conversation',async()
  assert.equal(r.code,200);assert.equal(r.body.text,'Welcome to OUTLAST.');assert.equal(captured.url,'https://api.openai.com/v1/responses');assert.equal(captured.body.store,false);assert.equal(captured.authorization,'Bearer server-key');
  fs.rmSync(dir,{recursive:true,force:true});
 });
+
+
+test('AI setup rejects requests without the private owner token',()=>{
+ const a=app(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'outlast-ai-'));
+ createAiAssistant({app:a,dataDir:dir,env:{OUTLAST_AI_OWNER_TOKEN:'owner-secret'}});
+ const response=res();a.routes.get('POST /api/ai/configure')({headers:{},body:{apiKey:'fake-test-token'},socket:{}},response);
+ assert.equal(response.code,403);fs.rmSync(dir,{recursive:true,force:true});
+});
+
+test('AI setup accepts an owner key without returning or writing the API key',()=>{
+ const a=app(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'outlast-ai-')),secret='fake-private-test-token';
+ createAiAssistant({app:a,dataDir:dir,env:{OUTLAST_AI_OWNER_TOKEN:'owner-secret'}});
+ const request={headers:{authorization:'Bearer owner-secret'},body:{apiKey:secret},socket:{}},response=res();
+ a.routes.get('POST /api/ai/configure')(request,response);
+ assert.equal(response.code,200);assert.equal(response.body.ok,true);
+ assert.equal(JSON.stringify(response.body).includes(secret),false);
+ assert.deepEqual(fs.readdirSync(dir),[]);
+ const status=res();a.routes.get('GET /api/ai/owner-status')(request,status);
+ assert.equal(status.body.apiKeyConfigured,true);assert.equal(JSON.stringify(status.body).includes(secret),false);
+ fs.rmSync(dir,{recursive:true,force:true});
+});
+
+test('AI connection test uses the server-held key and never returns it',async()=>{
+ const a=app(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'outlast-ai-'));let authorization='';
+ createAiAssistant({app:a,dataDir:dir,env:{OUTLAST_AI_OWNER_TOKEN:'owner-secret'},fetchImpl:async(_url,options)=>{authorization=options.headers.Authorization;return{ok:true,json:async()=>({output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'READY'}]}]})}}});
+ const headers={authorization:'Bearer owner-secret'},configured=res();
+ a.routes.get('POST /api/ai/configure')({headers,body:{apiKey:'fake-private-test-token'},socket:{}},configured);
+ const tested=res();await a.routes.get('POST /api/ai/test')({headers,body:{},socket:{}},tested);
+ assert.equal(tested.code,200);assert.equal(tested.body.ok,true);
+ assert.equal(authorization,'Bearer fake-private-test-token');
+ assert.equal(JSON.stringify(tested.body).includes('fake-private-test-token'),false);
+ fs.rmSync(dir,{recursive:true,force:true});
+});
