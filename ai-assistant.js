@@ -36,7 +36,7 @@ function createAiAssistant({app,dataDir,env=process.env,fetchImpl=global.fetch})
   if(!authorized(req))return res.status(403).json({ok:false,error:'Owner authorization required.'});
   if(limited(req,'setup'))return res.status(429).json({ok:false,error:'Too many setup attempts. Wait a minute.'});
   const apiKey=String(req.body?.apiKey||'').trim();
-  if(apiKey.length<20||apiKey.length>512||/\\s/.test(apiKey))return res.status(400).json({ok:false,error:'Enter a valid API key. It must be 20–512 characters with no spaces.'});
+  if(apiKey.length<20||apiKey.length>512||/\s/.test(apiKey))return res.status(400).json({ok:false,error:'Enter a valid API key. It must be 20–512 characters with no spaces.'});
   runtimeApiKey=apiKey;
   if(req.body&&typeof req.body==='object')req.body.apiKey='';
   res.set('Cache-Control','no-store');
