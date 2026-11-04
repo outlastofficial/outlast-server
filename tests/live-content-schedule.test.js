@@ -15,16 +15,17 @@ test('small additions rotate on a fixed 72-hour server schedule', () => {
 });
 
 test('weekly update event opens Saturday and runs through the following Saturday', () => {
-  const before = buildLiveContent(Date.UTC(2026, 10, 6, 23, 59));
-  const live = buildLiveContent(Date.UTC(2026, 10, 7, 0));
+  const before = buildLiveContent(Date.UTC(2026, 10, 7, 4, 59));
+  const live = buildLiveContent(Date.UTC(2026, 10, 7, 5));
   const midweek = buildLiveContent(Date.UTC(2026, 10, 11, 12));
-  const next = buildLiveContent(Date.UTC(2026, 10, 14, 0));
+  const next = buildLiveContent(Date.UTC(2026, 10, 14, 5));
   assert.equal(before.weeklyEvent.active, false);
   assert.equal(live.weeklyEvent.active, true);
   assert.equal(midweek.weeklyEvent.active, true);
   assert.match(live.weeklyEvent.title, /Part 1/);
-  assert.equal(live.weeklyEvent.startsAt, Date.UTC(2026, 10, 7, 0));
-  assert.equal(live.weeklyEvent.endsAt, Date.UTC(2026, 10, 14, 0));
+  assert.equal(live.weeklyEvent.startsAt, Date.UTC(2026, 10, 7, 5));
+  assert.equal(new Date(live.weeklyEvent.startsAt).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'long', hour: 'numeric', hour12: true }), 'Saturday, 12 AM');
+  assert.equal(live.weeklyEvent.endsAt, Date.UTC(2026, 10, 14, 5));
   assert.equal(next.weeklyEvent.active, true);
   assert.match(next.weeklyEvent.title, /Part 2/);
 });
